@@ -12,6 +12,16 @@ const { isolatedShellCommand } = await import('../server/live/agents.ts')
 
 const bwrap = Bun.which('bwrap')
 describe.skipIf(!bwrap)('Autopilot actual OS boundary', () => {
+  test('a worktree cannot mount an unrelated host directory as Git metadata', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'pilot-git-custody-'))
+    const repo = join(root, 'repo'), cwd = join(root, 'task'), privateDir = join(root, 'private'), providerHome = join(root, 'login')
+    for (const dir of [join(repo, '.git'), cwd, privateDir, providerHome]) mkdirSync(dir, { recursive: true })
+    writeFileSync(join(cwd, '.git'), `gitdir: ${privateDir}\n`)
+    writeFileSync(join(privateDir, 'secret'), 'host-only fixture')
+    const pilots = new PilotRuns(); pilots.runs = []
+    const run = pilots.begin('fixture', { harness: { kind: 'claude' }, hosts: [], secrets: [], approvals: [], parallel: 1 }); run.state = 'on'
+    await expect(prepareSandbox({ key: 'OWN-1/Agent', name: 'fixture', kind: 'claude', cwd, workspace: 'fixture' }, run, repo, async () => ({ out: '', code: 0 }), undefined, { providerHome, executable: () => '/usr/bin/cat' })).rejects.toThrow('Untrusted Git metadata')
+  })
   test('shared absolute runtime deadline kills a fake agent and its sleeping descendant', async () => {
     const root = mkdtempSync(join(tmpdir(), 'pilot-deadline-'))
     const cwd = join(root, 'project'), providerHome = join(root, 'fake-login')

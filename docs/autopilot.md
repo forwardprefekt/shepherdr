@@ -43,6 +43,8 @@ including shell commands, native helpers and headless reviewers, regardless of t
 home files, Herdr/Shepherdr control sockets and local/private network are absent. The coordinator sees its project read-only;
 workers can write only their own worktree and private runtime home. Host Git metadata is read-only. A worktree
 containing hardlinks to shared files is refused rather than exposing those shared inodes for writing.
+If the project uses Git, its root must have an ordinary `.git` directory, not a Git worktree. A task worktree's Git metadata
+must resolve to that project's own `.git/worktrees` directory; unrelated metadata paths are refused.
 
 Exact public HTTPS host names are allowed through a trusted CONNECT gateway. Wildcards, arbitrary ports, direct
 network access and private/loopback/Tailscale destinations are blocked, except for the explicitly selected OMP

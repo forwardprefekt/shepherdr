@@ -254,18 +254,28 @@ export async function prepareSandbox(spec: Spec, run: PilotRun, repo: string, cl
   await new Promise<void>((resolve, reject) => { server.once('error', reject); server.listen(socket, resolve) })
   try {
   const git: string[] = []
+  const project = realpathSync(repo)
+  const projectDot = join(project, '.git')
+  const projectMetadata = existsSync(projectDot) ? lstatSync(projectDot) : undefined
+  if (projectMetadata && !projectMetadata.isDirectory()) throw new Error('Isolated Autopilot requires a project with an ordinary .git directory.')
+  const common = projectMetadata ? realpathSync(projectDot) : undefined
   for (const cwd of [...new Set([repo, spec.cwd])]) {
     const dot = join(cwd, '.git')
     if (!existsSync(dot)) continue
-    git.push(dot)
-    try {
-      const text = readFileSync(dot, 'utf8')
-      if (text.startsWith('gitdir: ')) {
-        const dir = resolve(cwd, text.slice(8).trim()); git.push(dir)
-        const common = join(dir, 'commondir')
-        if (existsSync(common)) git.push(resolve(dir, readFileSync(common, 'utf8').trim()))
-      }
-    } catch { /* ordinary directory */ }
+    const metadata = lstatSync(dot)
+    if (metadata.isDirectory() && realpathSync(dot) === common) {
+      git.push(dot)
+      continue
+    }
+    if (!metadata.isFile() || !common) throw new Error('Untrusted Git metadata in the isolated workspace.')
+    const text = readFileSync(dot, 'utf8')
+    if (!text.startsWith('gitdir: ')) throw new Error('Untrusted Git metadata in the isolated workspace.')
+    const dir = realpathSync(resolve(cwd, text.slice(8).trim()))
+    const worktrees = join(common, 'worktrees')
+    if (dirname(dir) !== worktrees || !lstatSync(join(dir, 'commondir')).isFile()) throw new Error('Untrusted Git metadata in the isolated workspace.')
+    const linkedCommon = realpathSync(resolve(dir, readFileSync(join(dir, 'commondir'), 'utf8').trim()))
+    if (linkedCommon !== common) throw new Error('Untrusted Git metadata in the isolated workspace.')
+    git.push(dot, dir, common)
   }
   const args = sandboxArgs({ cwd: realpathSync(spec.cwd), repo: realpathSync(repo), home: homedir(), state, control, binary, bun: realpathSync(process.execPath), kind: spec.kind, writable: spec.key.includes('/'), git: [...new Set(git)].sort((a, b) => a.length - b.length) })
   const start = args.indexOf('--chdir')
