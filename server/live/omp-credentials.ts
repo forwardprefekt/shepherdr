@@ -61,7 +61,7 @@ export function ompCredentials(home: string, models: (string | undefined)[]) {
     if (url.protocol !== 'https:' || url.username || url.password || url.search || url.hash || !/^[a-z0-9-]+\.[a-z0-9-]+\.ts\.net$/.test(url.hostname) || url.pathname !== '/') throw new Error(`OMP isolation requires a Tailscale HTTPS gateway origin for provider ${provider}.`)
     const apiKey = gatewayBearer(home, entry.apiKey)
     if (!Array.isArray(entry.models)) throw new Error(`OMP isolation requires explicit models for gateway provider ${provider}.`)
-    const wanted = selected.filter((m) => m!.startsWith(`${provider}/`)).map((m) => m!.slice(provider.length + 1))
+    const wanted = [...new Set(selected.filter((m) => m!.startsWith(`${provider}/`)).map((m) => m!.slice(provider.length + 1)))]
     const modelList = wanted.map((id) => {
       const matches = (entry.models as unknown[]).filter((m) => object(m) && m.id === id)
       if (matches.length !== 1 || !object(matches[0])) throw new Error(`OMP isolation requires exactly one explicit gateway model ${provider}/${id}.`)

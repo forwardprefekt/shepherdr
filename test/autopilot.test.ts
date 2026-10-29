@@ -353,6 +353,8 @@ describe('trusted broker, limits and actual namespace configuration', () => {
     expect(output.providers['openai-codex'].models).toEqual([{ id: 'gpt-6.1-terra', name: 'Terra', contextWindow: 200000, cost: { input: 0 } }])
     expect(result.modelsConfig).not.toContain('unrelated')
     expect(result.credentials).not.toContain('gateway-secret')
+    const sameModel = ompCredentials(home, ['openai-codex/gpt-6.1-terra', 'openai-codex/gpt-6.1-terra'])
+    expect(JSON.parse(sameModel.modelsConfig).providers['openai-codex'].models).toEqual(output.providers['openai-codex'].models)
     const db = new Database(join(dir, 'agent.db'))
     db.run('CREATE TABLE auth_credentials (provider TEXT, credential_type TEXT, data TEXT, disabled_cause TEXT)')
     db.query('INSERT INTO auth_credentials VALUES (?, ?, ?, ?)').run('openai-codex', 'oauth', '{"refresh":"never-copy"}', null)
