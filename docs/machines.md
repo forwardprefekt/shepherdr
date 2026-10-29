@@ -2,8 +2,9 @@
 
 Shepherdr is installed once, on the main machine. Every other machine you save in herdr's Remote shows up on its own
 (`herdr machine add <ssh target>`, which also sets up herdr there): its spaces (its home space at least), tasks and
-chats, with their coordinators, run from the main machine. The other machine needs only herdr, git, perl and the agent CLIs (gh for
-pull requests of GitHub repos); nothing to install by hand.
+chats, with their coordinators, run from the main machine. The other machine needs herdr, git, tar, perl with
+JSON::PP, and at least one agent CLI: Claude Code, Codex, pi, or Oh My Pi (`omp`). `gh` is needed for pull requests
+of GitHub repos; nothing else needs to be installed by hand.
 
 - How: the main machine runs each one from a worker process of its own (`~/.shepherdr/machines/<name>/`). Agents,
   panes, worktrees and live events go through herdr's own remote bridge; git, the Files and Diff panels and merges

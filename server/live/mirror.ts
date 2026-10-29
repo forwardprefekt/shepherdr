@@ -155,5 +155,5 @@ type Proc = { stdin: unknown; stdout: ReadableStream<Uint8Array>; exited: Promis
 /** where the readers find another machine's CLI homes: in its mirror (a worker's environment) */
 export function mirrorHomes(home: string, box: BoxInfo): Record<string, string> {
   const m = (p: string) => `${home}/mirror${box.home}/${p}`
-  return { CLAUDE_CONFIG_DIR: m('.claude'), CODEX_HOME: m('.codex'), PI_CODING_AGENT_DIR: m('.pi/agent') }
+  return { CLAUDE_CONFIG_DIR: m('.claude'), CODEX_HOME: m('.codex'), PI_CODING_AGENT_DIR: m('.pi/agent'), SHEPHERDR_OMP_AGENT_DIR: m('.omp/agent') }
 }

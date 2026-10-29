@@ -162,7 +162,7 @@ export function commandSay(cmd: string): Said {
     case 'ps': case 'pgrep': return said('run', 'Look at what runs')
     case 'jq': return said('run', 'Read some JSON')
     case 'make': return said('run', `Run make${sub ? ` ${sub}` : ''}`)
-    case 'codex': case 'claude': case 'pi': return said('agent', 'Ask another agent')
+    case 'codex': case 'claude': case 'pi': case 'omp': return said('agent', 'Ask another agent')
     case 'bun': case 'npm': case 'pnpm': case 'yarn': case 'npx': case 'bunx': {
       if (['install', 'i', 'add', 'ci'].includes(sub)) return said('run', 'Install packages')
       if (sub === 'run') return said('run', /build/.test(args[1] ?? '') ? 'Build it' : `Run ${args[1] ?? 'a script'}`)

@@ -13,6 +13,7 @@ const READERS: Record<string, () => Reader> = {
   claude: () => new ClaudeReader(),
   codex: () => new CodexReader(),
   pi: () => new PiReader(),
+  omp: () => new PiReader('omp'),
 }
 
 /** Kinds with both runtime log discovery and a transcript reader. */

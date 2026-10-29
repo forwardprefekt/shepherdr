@@ -76,7 +76,7 @@ lp=$("\${SHELL:-/bin/sh}" -lc 'echo "@@$PATH@@"' 2>/dev/null </dev/null | sed -n
 lp="$HOME/.local/bin:$HOME/.bun/bin:/opt/homebrew/bin:/usr/local/bin:$lp"
 echo "path=$lp"
 PATH="$lp"
-for t in herdr git perl gh claude codex pi tar; do if command -v $t >/dev/null 2>&1; then echo "tool.$t=$(command -v $t)"; fi; done
+for t in herdr git perl gh claude codex pi omp tar; do if command -v $t >/dev/null 2>&1; then echo "tool.$t=$(command -v $t)"; fi; done
 perl -MJSON::PP -e1 2>/dev/null && echo "tool.jsonpp=1"
 cat "$HOME/.shepherdr/helper/version" 2>/dev/null | sed 's/^/helper=/'
 cat "$HOME/.shepherdr/helper/browser-version" 2>/dev/null | sed 's/^/browser=/'
@@ -223,6 +223,6 @@ export function lacks(p: Probe): string[] {
   if (!p.tools.git) out.push('git')
   if (!p.tools.perl || !p.tools.jsonpp) out.push('perl (with JSON::PP)')
   if (!p.tools.tar) out.push('tar')
-  if (!p.tools.claude && !p.tools.codex && !p.tools.pi) out.push('an agent CLI (Claude Code, Codex or pi)')
+  if (!p.tools.claude && !p.tools.codex && !p.tools.pi && !p.tools.omp) out.push('an agent CLI (Claude Code, Codex, pi or Oh My Pi)')
   return out
 }

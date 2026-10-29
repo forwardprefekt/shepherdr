@@ -30,12 +30,12 @@ wrapper PATH are verified before Herdr starts any agent. A shell configuration t
 
 ## Capabilities and limits
 
-| Runtime | Claude Code | Codex | pi | Other Herdr agents |
-| --- | --- | --- | --- | --- |
-| Shepherdr chat reader, model/effort adapter | Yes | Yes | Yes | Not currently viable for coordinator chat; refused |
-| Shared Linux isolation, schedule, fresh mode replacement | Yes | Yes | Yes | Refused |
-| Local Linux repository space with usable bubblewrap namespaces | Required | Required | Required | — |
-| Remote workers, macOS, home-space Autopilot | Currently refused | Currently refused | Currently refused | — |
+| Runtime | Claude Code | Codex | pi | Oh My Pi | Other Herdr agents |
+| --- | --- | --- | --- | --- | --- |
+| Shepherdr chat reader, model/effort adapter | Yes | Yes | Yes | Yes | Not currently viable for coordinator chat; refused |
+| Shared Linux isolation, schedule, fresh mode replacement | Yes | Yes | Yes | Refused | Refused |
+| Local Linux repository space with usable bubblewrap namespaces | Required | Required | Required | — | — |
+| Remote workers, macOS, home-space Autopilot | Currently refused | Currently refused | Currently refused | — | — |
 
 The **Isolated workspace** profile uses bubblewrap PID, mount, user and network namespaces, drops capabilities,
 clears inherited environment and starts with a private provider home. It applies to the whole process tree,

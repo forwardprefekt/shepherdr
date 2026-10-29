@@ -22,7 +22,7 @@
   for provisioning and the upgrade steps for already-running agents.
 
 - Interactive task, coordinator and backup chat choices require both runtime log discovery and a chat reader.
-  Settings and Restart offer Claude Code, Codex and pi; other herdr CLIs are refused before a chat launch because
+  Settings and Restart offer Claude Code, Codex, pi and Oh My Pi; other herdr CLIs are refused before a chat launch because
   their replies cannot be shown. Existing saved choices are kept, but an unsupported choice must be changed before
   launching again. Headless reviewer choices are separate; this does not add or prove support for other reviewers.
 
@@ -44,7 +44,7 @@ Private rules supplement repository/team rules. Explicit human instructions and 
 private rules. A conflict with team rules must be surfaced to the human, not silently resolved by replacing them.
 Shepherdr's normal role prompt and skills still apply.
 
-A new launch snapshots the role's current effective instructions. Claude Code and pi use the existing appended
+A new launch snapshots the role's current effective instructions. Claude Code, pi and Oh My Pi use the existing appended
 prompt file; other CLIs receive the existing hidden initial prompt. Saving does not interrupt, restart or update an
 already-running agent. Start a new agent or explicitly restart it to deliver changes. On resume, a changed prompt
 is sent again for CLIs without an append flag; it says the new private snapshot replaces the previous one, including

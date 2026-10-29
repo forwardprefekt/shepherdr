@@ -13,7 +13,7 @@ import { readJson, writeJson } from '../store.ts'
 import type { AgentRuntime, TermScreen } from '../../shared/types.ts'
 import { herdr, Subscription, type AgentInfo, type AgentStatus, type HerdrError, type HerdrEvent } from './herdr.ts'
 import { ClaudeSessions, Reviewers, screenBackground, sessionBackground, type Background } from './readers/background.ts'
-import { claudeHome, claudeLogPath, findClaudeLog, findCodexLog, findLog, findPiLog, logKind, mainCodexLog } from './readers/find.ts'
+import { claudeHome, claudeLogPath, findClaudeLog, findCodexLog, findLog, findOmpLog, findPiLog, logKind, mainCodexLog } from './readers/find.ts'
 import { effortFor, modelArg } from './models.ts'
 import { tag } from './chatlines.ts'
 import { hookSettings, HookLogs, type Said } from './readers/hooks.ts'
@@ -644,7 +644,13 @@ export class Agents extends Emitter<Events> {
     const s = a?.agent_session
     if (!r || !s) return
     if (s.kind === 'path' && addLog(r, r.isolation ? this.isolatedPath(r, s.value) : mirrored(s.value))) {
+      if (r.kind === 'omp') r.sessionId = s.value.match(/([0-9a-f-]{36})\.jsonl$/i)?.[1] ?? r.sessionId
       this.save()
+      this.emit('logs', key)
+    } else if (s.kind === 'id' && r.kind === 'omp' && r.sessionId !== s.value) {
+      r.sessionId = s.value
+      this.save()
+      this.discoverLog(key)
       this.emit('logs', key)
     } else if (s.kind === 'id' && r.kind === 'claude') {
       const p = r.isolation ? this.isolatedPath(r, join(homedir(), '.claude/projects', r.cwd.replace(/[^a-zA-Z0-9-]/g, '-'), `${s.value}.jsonl`)) : claudeLogPath(r.cwd, s.value)
@@ -709,8 +715,9 @@ export class Agents extends Emitter<Events> {
       if (f && addLog(r, f)) { this.save(); this.emit('logs', key) }
       return
     }
-    const f = r.kind === 'claude' ? (r.sessionId ? claudeLogPath(r.cwd, r.sessionId) : findClaudeLog(r.cwd, since)) : r.kind === 'codex' ? findCodexLog(r.cwd, since) : r.kind === 'pi' ? findPiLog(r.cwd, since) : undefined
+    const f = r.kind === 'claude' ? (r.sessionId ? claudeLogPath(r.cwd, r.sessionId) : findClaudeLog(r.cwd, since)) : r.kind === 'codex' ? findCodexLog(r.cwd, since) : r.kind === 'pi' ? findPiLog(r.cwd, since) : r.kind === 'omp' ? findOmpLog(r.cwd, since, r.sessionId) : undefined
     if (f && addLog(r, f)) {
+      if (r.kind === 'omp') r.sessionId = f.match(/([0-9a-f-]{36})\.jsonl$/i)?.[1] ?? r.sessionId
       this.save()
       this.emit('logs', key)
     }
@@ -785,7 +792,7 @@ export class Agents extends Emitter<Events> {
     r.launch = randomUUID()
     if (fresh) this.outbox = this.outbox.filter((item) => item.key !== spec.key || item.cid || !item.text.startsWith('<shepherdr>'))
     r.started = Date.now()
-    if (!resume) r.sessionId = r.kind === 'codex' ? undefined : randomUUID()
+    if (!resume) r.sessionId = r.kind === 'codex' || r.kind === 'omp' ? undefined : randomUUID()
     // a run of its own: what its hooks record starts over
     if (r.hooks) this.hooks.forget(mirrored(r.hooks))
     r.hooks = undefined
@@ -840,7 +847,7 @@ export class Agents extends Emitter<Events> {
     await this.bindRoute(r, pane)
     // CLIs without an option for extra instructions get them first, hidden from the chat. Both wait until the CLI is
     // ready, ahead of what you sent meanwhile (a restart)
-    this.queue(r.key, [r.kind !== 'claude' && r.kind !== 'pi' && (!resume || changedPrompt) && r.system ? hidden(r.system) : '', first ?? ''].filter(Boolean), true)
+    this.queue(r.key, [r.kind !== 'claude' && r.kind !== 'pi' && r.kind !== 'omp' && (!resume || changedPrompt) && r.system ? hidden(r.system) : '', first ?? ''].filter(Boolean), true)
     setTimeout(() => this.deliver(r.key), 1000)
     setTimeout(() => this.discoverLog(r.key), 3000)
     setTimeout(() => this.discoverLog(r.key), 15000)
@@ -868,6 +875,17 @@ export class Agents extends Emitter<Events> {
       if (effort) a.push('--effort', effort)
     } else if (r.kind === 'pi') {
       if (r.sessionId) a.push('--session-id', r.sessionId)
+      if (r.system) a.push('--append-system-prompt', this.promptFile(r))
+      if (model) a.push('--model', model)
+      if (effort) a.push('--thinking', effort)
+    } else if (r.kind === 'omp') {
+      // Never let a fresh Shepherdr agent inherit an unrelated terminal's auto-resumed session.
+      const config = `${promptPath(r.name)}.omp.yml`
+      task.mkdirSync(dirname(config), { recursive: true })
+      task.writeFileSync(config, 'autoResume: false\n')
+      a.push('--config', config)
+      const id = r.sessionId ?? r.logs.findLast((f) => logKind(f) === 'omp')?.match(/([0-9a-f-]{36})\.jsonl$/i)?.[1]
+      if (resume && id) a.push('--resume', id)
       if (r.system) a.push('--append-system-prompt', this.promptFile(r))
       if (model) a.push('--model', model)
       if (effort) a.push('--thinking', effort)
@@ -899,6 +917,7 @@ export class Agents extends Emitter<Events> {
   filesOf(r: AgentRecord): Record<string, string> {
     if (r.isolation) return {} // host paths differ from the namespace; the wrapper is verified before every launch
     if (r.kind === 'claude') return { '--settings': join(HOOKS_DIR, `${r.name}.settings.json`), ...(r.system ? { '--append-system-prompt-file': promptPath(r.name) } : {}) }
+    if (r.kind === 'omp') return { '--config': `${promptPath(r.name)}.omp.yml`, ...(r.system ? { '--append-system-prompt': promptPath(r.name) } : {}) }
     if (r.kind === 'pi' && r.system) return { '--append-system-prompt': promptPath(r.name) }
     return {}
   }

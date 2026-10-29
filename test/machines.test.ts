@@ -6,7 +6,7 @@ import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, utime
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { parseHookLines } from '../server/live/readers/hooks.ts'
-import { helperFiles, helperVersion } from '../server/live/install.ts'
+import { helperFiles, helperVersion, lacks, type Probe } from '../server/live/install.ts'
 import { Mirror, mirrorHomes } from '../server/live/mirror.ts'
 import { carryClaudeSession } from '../server/live/agents.ts'
 import type { BoxInfo } from '../server/live/box.ts'
@@ -119,6 +119,29 @@ describe('the helper', () => {
 })
 
 describe('a machine run from the main one', () => {
+  test('admission accepts each agent CLI and still requires the other tools', () => {
+    const p: Probe = { home: '/home/remote', os: 'Linux', arch: 'x86_64', path: '/usr/bin', herdr: 'herdr', tools: { herdr: true, git: true, perl: true, jsonpp: true, tar: true }, helper: '', browser: '', oldInstall: false }
+    expect(lacks(p)).toEqual(['an agent CLI (Claude Code, Codex, pi or Oh My Pi)'])
+    for (const agent of ['claude', 'codex', 'pi', 'omp']) {
+      expect(lacks({ ...p, tools: { ...p.tools, [agent]: true } })).toEqual([])
+    }
+    for (const [tool, missing] of [['herdr', 'herdr'], ['git', 'git'], ['perl', 'perl (with JSON::PP)'], ['jsonpp', 'perl (with JSON::PP)'], ['tar', 'tar']]) {
+      expect(lacks({ ...p, tools: { ...p.tools, omp: true, [tool]: false } })).toEqual([missing])
+    }
+  })
+
+  test('the remote probe discovers omp on the machine', () => {
+    const home = mkdtempSync(join(tmpdir(), 'shep-probe-'))
+    const bin = join(home, '.local', 'bin')
+    mkdirSync(bin, { recursive: true })
+    writeFileSync(join(bin, 'omp'), '#!/bin/sh\nexit 0\n', { mode: 0o755 })
+    writeFileSync(join(bin, 'ssh'), '#!/bin/sh\nfor arg do command=$arg; done\nexec /bin/sh -c "$command"\n', { mode: 0o755 })
+    const code = `import { probe } from ${JSON.stringify(join(root, 'server/live/install.ts'))}; console.log(JSON.stringify(await probe('remote')))`
+    const r = spawnSync(process.execPath, ['-e', code], { encoding: 'utf8', env: { ...process.env, HOME: home, SHELL: '/bin/sh', SHEPHERDR_MAIN_HOME: home, PATH: `${bin}:${process.env.PATH}` } })
+    expect(r.status).toBe(0)
+    expect((JSON.parse(r.stdout) as Probe).tools.omp).toBe(true)
+  })
+
   test("its home space's coordinator runs in its home folder there, and its log is read from the mirror of that machine's", () => {
     const home = mkdtempSync(join(tmpdir(), 'shep-worker-'))
     const box: BoxInfo = { label: 'vm-demo', target: 'vm-demo', session: 'default', herdr: 'herdr', home: '/home/exedev', path: '/usr/bin:/bin', os: 'Linux' }

@@ -1,19 +1,21 @@
 // Where each CLI keeps an agent's log file. Homes follow the CLIs' own settings: CLAUDE_CONFIG_DIR, CODEX_HOME,
 // PI_CODING_AGENT_DIR (tests point these at fixtures).
-import { closeSync, existsSync, openSync, readdirSync, readSync, statSync } from 'node:fs'
-import { homedir } from 'node:os'
-import { join } from 'node:path'
+import { closeSync, existsSync, openSync, readdirSync, readSync, realpathSync, statSync } from 'node:fs'
+import { homedir, tmpdir } from 'node:os'
+import { isAbsolute, join, relative, resolve } from 'node:path'
+import { BOX, boxHome } from '../box.ts'
 
 const env = (k: string) => process.env[k] || undefined
 
 export const claudeHome = () => env('CLAUDE_CONFIG_DIR') ?? join(homedir(), '.claude')
 export const codexHome = () => env('CODEX_HOME') ?? join(homedir(), '.codex')
 export const piHome = () => env('PI_CODING_AGENT_DIR') ?? join(homedir(), '.pi', 'agent')
+export const ompHome = () => env('SHEPHERDR_OMP_AGENT_DIR') ?? env('PI_CODING_AGENT_DIR') ?? join(homedir(), '.omp', 'agent')
 
 const trimSlash = (p: string) => (p.length > 1 ? p.replace(/[/\\]+$/, '') : p)
 
 /** newest .jsonl in a folder changed at or after sinceMs */
-function newestLog(dir: string, sinceMs = 0): string | undefined {
+function newestLog(dir: string, sinceMs = 0, sessionId?: string): string | undefined {
   let best: { f: string; m: number } | undefined
   let names: string[]
   try {
@@ -22,7 +24,7 @@ function newestLog(dir: string, sinceMs = 0): string | undefined {
     return undefined
   }
   for (const n of names) {
-    if (!n.endsWith('.jsonl')) continue
+    if (!n.endsWith('.jsonl') || (sessionId && !n.endsWith(`_${sessionId}.jsonl`))) continue
     const f = join(dir, n)
     try {
       const m = statSync(f).mtimeMs
@@ -152,11 +154,49 @@ export function piSessionDir(cwd: string): string {
 /** the newest pi session log for this cwd, changed at or after sinceMs */
 export const findPiLog = (cwd: string, sinceMs?: number) => newestLog(piSessionDir(cwd), sinceMs)
 
+/** OMP uses home-relative buckets, and recent versions also use temp-relative buckets.
+ *  Older OMP versions use pi's absolute spelling outside home. Follow both on upgrades. */
+export function ompSessionDirs(cwd: string): string[] {
+  const canonical = (p: string) => {
+    const resolved = resolve(p)
+    if (BOX) return resolved
+    try { return realpathSync(resolved) } catch { return resolved }
+  }
+  const path = canonical(cwd)
+  const home = canonical(boxHome())
+  const temp = canonical(BOX ? '/tmp' : tmpdir())
+  const inside = (root: string) => {
+    const rel = relative(root, path)
+    return rel === '' || (!rel.startsWith('..') && !isAbsolute(rel)) ? rel : undefined
+  }
+  const encode = (p: string) => p.replace(/[/\\:]/g, '-')
+  const homeRel = inside(home), tempRel = inside(temp)
+  const name = tempRel !== undefined ? `-tmp${tempRel ? `-${encode(tempRel)}` : ''}`
+    : homeRel !== undefined ? `-${encode(homeRel)}`
+    : `--${encode(path.replace(/^[/\\]/, ''))}--`
+  const legacy = `--${encode(path.replace(/^[/\\]/, ''))}--`
+  return [...new Set([name, legacy])].map((n) => join(ompHome(), 'sessions', n))
+}
+
+export function findOmpLog(cwd: string, sinceMs?: number, sessionId?: string): string | undefined {
+  let best: { file: string; mtime: number } | undefined
+  for (const dir of ompSessionDirs(cwd)) {
+    const file = newestLog(dir, sinceMs, sessionId)
+    if (!file) continue
+    try {
+      const mtime = statSync(file).mtimeMs
+      if (!best || mtime > best.mtime) best = { file, mtime }
+    } catch {}
+  }
+  return best?.file
+}
+
 /** Runtime log discovery, also used to decide which kinds can supply chat. */
 export const LOG_FINDERS: Record<string, (cwd: string, sinceMs?: number) => string | undefined> = {
   claude: findClaudeLog,
   codex: findCodexLog,
   pi: findPiLog,
+  omp: findOmpLog,
 }
 
 /** the newest log of this CLI for this cwd */
@@ -169,11 +209,13 @@ export function logKind(file: string): string | undefined {
   if (file.includes('/autopilot-runtime/')) {
     if (file.includes('/.claude/')) return 'claude'
     if (file.includes('/.codex/')) return 'codex'
+    if (file.includes('/.omp/')) return 'omp'
     if (file.includes('/.pi/')) return 'pi'
   }
   const under = (dir: string) => file.startsWith(`${trimSlash(dir)}/`)
   if (under(join(claudeHome(), 'projects'))) return 'claude'
   if (under(join(codexHome(), 'sessions'))) return 'codex'
+  if (under(join(ompHome(), 'sessions'))) return 'omp'
   if (under(join(piHome(), 'sessions'))) return 'pi'
   return undefined
 }

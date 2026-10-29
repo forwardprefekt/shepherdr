@@ -1,9 +1,10 @@
 // The log readers, on made-up lines in each CLI's exact format (field names and nesting copied from real logs).
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test'
 import { appendFileSync, mkdirSync, mkdtempSync, renameSync, rmSync, utimesSync, writeFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { homedir, tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { claudeLogPath, findClaudeLog, findCodexLog, findPiLog, piSessionDir } from '../server/live/readers/find.ts'
+import { spawnSync } from 'node:child_process'
+import { claudeLogPath, findClaudeLog, findCodexLog, findOmpLog, findPiLog, logKind, ompSessionDirs, piSessionDir } from '../server/live/readers/find.ts'
 import { LogTail, readerFor } from '../server/live/readers/index.ts'
 import type { LogEvent } from '../server/live/readers/types.ts'
 
@@ -390,6 +391,21 @@ describe('pi reader', () => {
   })
 })
 
+describe('omp reader', () => {
+  test('reads real OMP v18 session records, including the title before its header and model change', () => {
+    const ev = parse('omp', [
+      { type: 'title', v: 1, title: 'Example', source: 'auto', updatedAt: '2026-10-29T20:07:14.410Z', pad: '  ' },
+      { type: 'session', version: 3, id: '01a18915-0ad2-70c1-a72a-899c194d1e45', timestamp: '2026-10-29T19:13:40.050Z', cwd: '/tmp' },
+      { type: 'model_change', id: 'fdb66ebd', parentId: null, timestamp: '2026-10-29T19:13:40.210Z', runtime: { version: '18.13.3' }, model: 'cursor/claude-opus-5-high' },
+      pimsg('user', 'fdb66ebd', { role: 'user', content: [{ type: 'text', text: 'Hello' }], attribution: 'user', timestamp: 1 }),
+      pimsg('answer', 'user', { role: 'assistant', content: [{ type: 'thinking', thinking: 'private' }, { type: 'text', text: 'Hi' }], model: 'claude-opus-5-high', usage: { totalTokens: 12 }, stopReason: 'stop', timestamp: 2 }),
+    ])
+    expect(brief(ev)).toEqual(['session:session-01a18915-0ad2-70c1-a72a-899c194d1e45', 'user:Hello', 'agent:Hi', 'turn-end:turn-answer'])
+    expect(ev.find((e) => e.kind === 'runtime')).toMatchObject({ runtime: { model: 'cursor/claude-opus-5-high' } })
+    expect(readerFor('omp')?.cli).toBe('omp')
+  })
+})
+
 /* ---------- LogTail and finding logs ---------- */
 
 let dir = ''
@@ -462,7 +478,7 @@ describe('LogTail', () => {
 describe('finding logs', () => {
   const env = { ...process.env }
   afterAll(() => {
-    for (const k of ['CLAUDE_CONFIG_DIR', 'CODEX_HOME', 'PI_CODING_AGENT_DIR']) {
+    for (const k of ['CLAUDE_CONFIG_DIR', 'CODEX_HOME', 'PI_CODING_AGENT_DIR', 'SHEPHERDR_OMP_AGENT_DIR']) {
       if (env[k] === undefined) delete process.env[k]
       else process.env[k] = env[k]
     }
@@ -511,6 +527,36 @@ describe('finding logs', () => {
     touch(join(piSessionDir(cwd), '2026-10-13T21-00-00-000Z_b.jsonl'), piSession('b'), now - 2000)
     expect(findPiLog(cwd)).toBe(join(piSessionDir(cwd), '2026-10-13T21-00-00-000Z_b.jsonl'))
     expect(findPiLog(cwd, now)).toBeUndefined()
+  })
+
+  test('omp: home-relative and legacy absolute buckets are discovered and tailed', () => {
+    process.env.SHEPHERDR_OMP_AGENT_DIR = join(dir, 'omp')
+    const cwd = join(homedir(), 'project')
+    const [current, legacy] = ompSessionDirs(cwd)
+    expect(current).toBe(join(dir, 'omp', 'sessions', '-project'))
+    const now = Date.now()
+    const f = join(current, '2026-10-29T19-13-40-050Z_01a18915-0ad2-70c1-a72a-899c194d1e45.jsonl')
+    touch(join(legacy, 'old.jsonl'), piSession('old'), now - 5000)
+    touch(f, jl({ type: 'title', v: 1, title: 'Example' }) + piSession('omp-id') + piUser('u', 'hello'), now - 1000)
+    expect(findOmpLog(cwd)).toBe(f)
+    expect(logKind(f)).toBe('omp')
+    expect(brief(new LogTail(f, readerFor('omp')!).read())).toEqual(['session:session-omp-id', 'user:hello'])
+    expect(findOmpLog(cwd, now)).toBeUndefined()
+    expect(findOmpLog(cwd, undefined, '01a18915-0ad2-70c1-a72a-899c194d1e45')).toBe(f)
+    expect(findOmpLog(cwd, undefined, 'missing')).toBeUndefined()
+  })
+
+  test('omp: remote home buckets resolve within the worker mirror', () => {
+    const box = { label: 'worker', target: 'worker', session: '', herdr: '', home: '/home/remote', path: '', os: 'Linux' }
+    const mirror = join(dir, 'mirror')
+    const f = join(mirror, 'sessions', '-project', '2026-10-29T19-13-40-050Z_01a18915-0ad2-70c1-a72a-899c194d1e45.jsonl')
+    touch(f, piSession('remote') + piUser('u', 'from remote'), Date.now())
+    const module = join(import.meta.dir, '../server/live/readers/find.ts')
+    const reader = join(import.meta.dir, '../server/live/readers/index.ts')
+    const code = `const f = await import(${JSON.stringify(module)}); const r = await import(${JSON.stringify(reader)}); const path = f.findOmpLog('/home/remote/project'); console.log(JSON.stringify({ path, kind: f.logKind(path), events: new r.LogTail(path, r.readerFor('omp')).read().map(e => e.kind) }))`
+    const result = spawnSync(process.execPath, ['-e', code], { encoding: 'utf8', env: { ...process.env, SHEPHERDR_BOX: JSON.stringify(box), SHEPHERDR_OMP_AGENT_DIR: mirror } })
+    expect(result.status).toBe(0)
+    expect(JSON.parse(result.stdout)).toEqual({ path: f, kind: 'omp', events: ['session', 'turn-start', 'user'] })
   })
 })
 

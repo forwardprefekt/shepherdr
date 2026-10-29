@@ -37,7 +37,7 @@ import { Machines } from './machines.ts'
 import { agentEnv, BOX, boxHome } from './box.ts'
 import { fileType } from '../../shared/files.ts'
 import { Mirror } from './mirror.ts'
-import { claudeProjectDir, piSessionDir } from './readers/find.ts'
+import { claudeProjectDir, ompSessionDirs, piSessionDir } from './readers/find.ts'
 import { boxDir } from './mfs.ts'
 import * as task from './mfs.ts'
 import { asMode, HOME_SPACE, HOST, NAME, placeId, Places } from './places.ts'
@@ -323,6 +323,7 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
     for (const r of Object.values(this.agents.records)) {
       if (r.kind === 'claude') dirs.push(task.unmirrored(claudeProjectDir(r.cwd)))
       if (r.kind === 'pi') dirs.push(task.unmirrored(piSessionDir(r.cwd)))
+      if (r.kind === 'omp') dirs.push(...ompSessionDirs(r.cwd).map(task.unmirrored))
       files.push(...r.logs.map(task.unmirrored))
     }
     this.mirror!.follow(dirs, files)

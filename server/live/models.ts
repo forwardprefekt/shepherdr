@@ -53,6 +53,7 @@ export const TABLE: Record<string, CliModels> = {
   },
   // pi reaches many providers' models: only pi itself can list them
   pi: { models: [], efforts: PI_LEVELS },
+  omp: { models: [], efforts: PI_LEVELS },
 }
 
 /** Claude Code's families as its /model menu offers them, newest of each; its aliases (opus, haiku) name these too */
@@ -83,7 +84,7 @@ export function findModel(kind: string, value?: string): Model | undefined {
     all.find((m) => m.id.toLowerCase() === v || m.label.toLowerCase() === v) ??
     (kind === 'claude' ? c.models.find((m) => m.id.startsWith(`claude-${v}-`) || m.id === `claude-${v}`) : undefined) ??
     // pi: a model without its provider
-    (kind === 'pi' ? all.find((m) => m.id.toLowerCase().endsWith(`/${v}`)) : undefined)
+    (kind === 'pi' || kind === 'omp' ? all.find((m) => m.id.toLowerCase().endsWith(`/${v}`)) : undefined)
   )
 }
 
