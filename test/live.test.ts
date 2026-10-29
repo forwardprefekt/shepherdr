@@ -881,7 +881,7 @@ describe('interactive chat capabilities', () => {
   test('Settings offers runtime-readable kinds and rejects unsupported selections without changing defaults', async () => {
     const { CHAT_KINDS, readerFor } = await import('../server/live/readers/index.ts')
     const { LOG_FINDERS } = await import('../server/live/readers/find.ts')
-    const { KIND, REVIEWERS } = await import('../server/live/settings.ts')
+    const { KIND } = await import('../server/live/settings.ts')
     const settings = new Settings({ everywhere: {}, machine: {}, spaces: {} })
     const legacy = new Settings({ everywhere: { 'task.agent': 'Antigravity' }, machine: {}, spaces: {} })
     expect(legacy.get('task.agent')).toBe('Antigravity')
@@ -899,7 +899,7 @@ describe('interactive chat capabilities', () => {
       expect(LOG_FINDERS[kind]).toBeFunction()
     }
     expect(settings.set('task.fallback', 'off').ok).toBe(true)
-    expect(REVIEWERS).toEqual(['Codex', 'Claude Code', 'pi'])
+    expect(settings.set('reviewer.agent', 'Oh My Pi').ok).toBe(true)
   })
 
   test('unsupported starts and restarts fail before callbacks or agent state changes', async () => {

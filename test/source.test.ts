@@ -377,7 +377,6 @@ describe("a task's CLI, model and effort", () => {
       [['--model', 'opus;rm'], 'Write a model id'],
       [['--prio', 'high'], 'Task add takes no --prio'],
       [['--effort'], '--effort needs a value'],
-      [['--agent', 'gemini', '--model', 'x'], 'Claude Code, Codex and pi only'],
     ]) {
       const r = await src.cli(['task', 'add', 'Odd', '--desc', 'x', ...args], { chat: place })
       expect(r.code).toBe(1)

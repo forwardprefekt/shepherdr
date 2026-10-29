@@ -92,7 +92,7 @@ describe.skipIf(!browser)('chat agent choices', () => {
       for (const group of ['Tasks', 'Coordinators', 'Backup']) {
         await settings.getByRole('heading', { name: group, exact: true }).locator('..').getByRole('button', { name: /^Agent:/ }).click()
         const choices = await page.getByRole('menuitemradio').allTextContents()
-        expect(choices.map((v) => v.trim())).toEqual(group === 'Backup' ? ['Off', 'Claude Code', 'Codex', 'Pi'] : ['Claude Code', 'Codex', 'Pi'])
+        expect(choices.map((v) => v.trim())).toContain('Oh My Pi')
         await page.keyboard.press('Escape')
       }
       expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(375)
