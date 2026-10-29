@@ -39,12 +39,12 @@ export interface Reviewer {
   effort?: string
 }
 
-const REVIEWER_NAME: Record<string, string> = { claude: 'Claude Code', codex: 'Codex', pi: 'pi' }
+const REVIEWER_NAME: Record<string, string> = { claude: 'Claude Code', codex: 'Codex', pi: 'pi', omp: 'Oh My Pi' }
 
 /** "a headless Codex or a Codex subagent (its default model and effort)", "… Claude Code … (model opus, high effort)" */
 export function reviewerWords(r: Reviewer) {
   const name = REVIEWER_NAME[r.kind] ?? r.kind
-  const who = `a headless ${name} or a ${name} subagent`
+  const who = `a headless ${name} or ${r.kind === 'omp' ? 'an' : 'a'} ${name} subagent`
   if (!r.model && !r.effort) return `${who} (its default model and effort)`
   return `${who} (${[r.model ? `model ${r.model}` : 'its default model', r.effort ? `${r.effort} effort` : 'its default effort'].join(', ')})`
 }

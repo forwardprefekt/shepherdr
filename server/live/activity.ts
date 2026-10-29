@@ -6,8 +6,8 @@ import { join } from 'node:path'
 import { glance, rowsOf } from '../../shared/activity.ts'
 import type { Job, Step, TurnActivity } from '../../shared/types.ts'
 import type { Headless } from './readers/background.ts'
-import { claudeHome, claudeProjectDir, codexHome } from './readers/find.ts'
-import { ClaudeReader, CodexReader, LogTail } from './readers/index.ts'
+import { claudeHome, claudeProjectDir, codexHome, logKind, ompHome } from './readers/find.ts'
+import { ClaudeReader, CodexReader, LogTail, readerFor } from './readers/index.ts'
 import type { LogEvent, OutputAt } from './readers/types.ts'
 
 export type StepRec = Step & { where?: OutputAt }
@@ -262,7 +262,8 @@ export class JobLogs {
   private read(file: string): LogEvent[] {
     let l = this.logs.get(file)
     if (!l) {
-      const reader = file.includes('/subagents/') ? new ClaudeReader(true) : file.startsWith(codexHome()) ? new CodexReader() : new ClaudeReader(true)
+      const kind = logKind(file)
+      const reader = kind === 'omp' ? readerFor(kind)! : file.includes('/subagents/') ? new ClaudeReader(true) : file.startsWith(codexHome()) ? new CodexReader() : new ClaudeReader(true)
       l = { tail: new LogTail(file, reader), ev: [], used: 0 }
       this.logs.set(file, l)
       // a few logs at a time: the oldest read goes
@@ -282,7 +283,7 @@ export class JobLogs {
  *  folder's project since it started that isn't its agent's own */
 function headlessLog(h: Headless, own: string[]): string | undefined {
   if (!h.pid) return undefined
-  const ours = (f: string) => f.endsWith('.jsonl') && (f.startsWith(join(codexHome(), 'sessions')) || f.startsWith(join(claudeHome(), 'projects')))
+  const ours = (f: string) => !own.includes(f) && f.endsWith('.jsonl') && (f.startsWith(join(codexHome(), 'sessions')) || f.startsWith(join(claudeHome(), 'projects')) || f.startsWith(join(ompHome(), 'sessions')))
   try {
     for (const fd of readdirSync(`/proc/${h.pid}/fd`)) {
       try {
@@ -292,6 +293,7 @@ function headlessLog(h: Headless, own: string[]): string | undefined {
         /* closed meanwhile */
       }
     }
+    if (h.argv.some((a) => /(^|\/)omp(\.(js|mjs|cjs))?$/.test(a))) return undefined
     const dir = claudeProjectDir(readlinkSync(`/proc/${h.pid}/cwd`))
     let best: { f: string; t: number } | undefined
     for (const n of readdirSync(dir)) {
@@ -308,7 +310,7 @@ function headlessLog(h: Headless, own: string[]): string | undefined {
 
 /** what it is in a few words: "codex exec: Review this change…" */
 function headlessTitle(argv: string[]): string {
-  const at = argv.findIndex((a) => /(^|\/)(codex|claude|pi)(\.(js|mjs|cjs))?$/.test(a))
+  const at = argv.findIndex((a) => /(^|\/)(codex|claude|pi|omp)(\.(js|mjs|cjs))?$/.test(a))
   const cli = (argv[at] ?? 'agent').split('/').at(-1)!.replace(/\.(js|mjs|cjs)$/, '')
   const how = cli === 'codex' ? 'exec' : '-p'
   // its prompt: its longest word that is no flag

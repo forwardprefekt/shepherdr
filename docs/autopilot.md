@@ -33,9 +33,9 @@ wrapper PATH are verified before Herdr starts any agent. A shell configuration t
 | Runtime | Claude Code | Codex | pi | Oh My Pi | Other Herdr agents |
 | --- | --- | --- | --- | --- | --- |
 | Shepherdr chat reader, model/effort adapter | Yes | Yes | Yes | Yes | Not currently viable for coordinator chat; refused |
-| Shared Linux isolation, schedule, fresh mode replacement | Yes | Yes | Yes | Refused | Refused |
-| Local Linux repository space with usable bubblewrap namespaces | Required | Required | Required | — | — |
-| Remote workers, macOS, home-space Autopilot | Currently refused | Currently refused | Currently refused | — | — |
+| Shared Linux isolation, schedule, fresh mode replacement | Yes | Yes | Yes | Yes | Refused |
+| Local Linux repository space with usable bubblewrap namespaces | Required | Required | Required | Required | — |
+| Remote workers, macOS, home-space Autopilot | Currently refused | Currently refused | Currently refused | Currently refused | — |
 
 The **Isolated workspace** profile uses bubblewrap PID, mount, user and network namespaces, drops capabilities,
 clears inherited environment and starts with a private provider home. It applies to the whole process tree,
@@ -51,6 +51,21 @@ so another service hosted on the same IP may be reachable. Custom providers may 
 host networking. Provider configuration is copied selectively: host MCP executors, hooks and installed plugins
 are not imported. The selected agent and reviewer login files are copied into the private home; the host login files are not overwritten.
 A login that cannot work in the isolated runtime needs the human; it never falls back to another account.
+OMP requires a stored API key for the selected fully qualified `provider/model`, or a fully qualified
+`modelRoles.default` in `~/.omp/agent/config.yml`. Only matching enabled API-key records are read from
+`~/.omp/agent/agent.db` and imported into the private OMP home; other accounts, settings, MCP credentials,
+hooks and plugins are not copied. OAuth credentials are refused because refreshing a copied token could rotate it
+and invalidate the host login. Store an API key in OMP instead. Environment-only credentials, custom model
+definitions, external authentication brokers and local providers are not imported. OMP is started with extension
+discovery disabled and a private configuration overlay disables project MCP configuration. Provider authentication
+and hosts must work through the same HTTPS gateway. Each selected provider must have exactly one enabled stored
+credential: no credential or multiple enabled credentials stops the launch rather than choosing an account.
+
+To smoke-test OMP Autopilot on a supported Linux repository, install OMP and bubblewrap, store an API key for the selected
+provider in OMP, select a fully qualified OMP model, and allow its public HTTPS host in the Autopilot profile. Turn ON,
+send a message and confirm the reply appears in the chat; delegate an owned task and confirm its transcript and
+reported-token count appear, then turn OFF and confirm the coordinator and owned worker stop. Repeat with an
+unapproved host and verify the request fails without falling back to host networking.
 
 The gateway fixes command chat/cwd identity itself. A caller cannot choose another task, secret scope or permission
 profile. Secret values use the existing masked CLI flow, only for names explicitly in this profile. Settings,

@@ -1,5 +1,5 @@
 // Runs INSIDE the network and PID namespace. Its only connection out is the trusted Unix gateway.
-import { existsSync, openSync, readSync, closeSync, statSync } from 'node:fs'
+import { existsSync, openSync, readSync, closeSync, statSync, unlinkSync } from 'node:fs'
 import { join, relative } from 'node:path'
 import { connect, createServer } from 'node:net'
 const relay = createServer((socket) => {
@@ -10,7 +10,15 @@ const relay = createServer((socket) => {
 })
 await new Promise<void>((resolve, reject) => { relay.once('error', reject); relay.listen(18765, '127.0.0.1', resolve) })
 const [binary, ...args] = process.argv.slice(2)
-const env = { ...process.env, HTTP_PROXY: 'http://127.0.0.1:18765', HTTPS_PROXY: 'http://127.0.0.1:18765', ALL_PROXY: 'http://127.0.0.1:18765', NO_PROXY: '127.0.0.1', http_proxy: 'http://127.0.0.1:18765', https_proxy: 'http://127.0.0.1:18765', SHEPHERDR_URL: 'http://127.0.0.1:18765' }
+const env: Record<string, string | undefined> = { ...process.env, HTTP_PROXY: 'http://127.0.0.1:18765', HTTPS_PROXY: 'http://127.0.0.1:18765', ALL_PROXY: 'http://127.0.0.1:18765', NO_PROXY: '127.0.0.1', http_proxy: 'http://127.0.0.1:18765', https_proxy: 'http://127.0.0.1:18765', SHEPHERDR_URL: 'http://127.0.0.1:18765' }
+const ompDir = join(process.env.HOME!, '.omp/agent')
+const credentials = join(ompDir, 'autopilot-credentials.json')
+if (existsSync(credentials)) {
+  const imported = Bun.spawn(['/run/shepherdr/omp-native', 'auth', 'import', credentials], { env: { ...env, PI_CODING_AGENT_DIR: ompDir }, stdin: 'ignore', stdout: 'ignore', stderr: 'inherit' })
+  if (await imported.exited !== 0) throw new Error('Could not import isolated OMP credentials.')
+  unlinkSync(credentials)
+}
+if (binary === '/run/shepherdr/omp') env.PI_CODING_AGENT_DIR = ompDir
 // Open agent-written paths only INSIDE the namespace. The host receives bytes, never a path to open.
 const positions = new Map<string, number>()
 let capturing = false
@@ -18,7 +26,7 @@ async function capture() {
   if (capturing) return
   capturing = true
   try {
-    const files = ['.claude/projects', '.codex/sessions', '.pi/agent/sessions'].flatMap((dir) => {
+    const files = ['.claude/projects', '.codex/sessions', '.pi/agent/sessions', '.omp/agent/sessions'].flatMap((dir) => {
       const cwd = join(process.env.HOME!, dir)
       return existsSync(cwd) ? Array.from(new Bun.Glob('**/*.jsonl').scanSync({ cwd, dot: true, absolute: true, onlyFiles: true })) : []
     })
@@ -30,7 +38,7 @@ async function capture() {
         if (offset === size) continue
         fd = openSync(file, 'r')
         const buffer = Buffer.alloc(Math.min(size - offset, 128 * 1024)), n = readSync(fd, buffer, 0, buffer.length, offset)
-        const path = relative(process.env.HOME!, file), kind = path.startsWith('.claude/') ? 'claude' : path.startsWith('.codex/') ? 'codex' : 'pi'
+        const path = relative(process.env.HOME!, file), kind = path.startsWith('.claude/') ? 'claude' : path.startsWith('.codex/') ? 'codex' : path.startsWith('.omp/') ? 'omp' : 'pi'
         const reply = await fetch('http://127.0.0.1:18765/api/transcript', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ kind, file: path, offset, data: buffer.subarray(0, n).toString('base64') }), signal: AbortSignal.timeout(2000) })
         if (reply.ok) positions.set(file, offset + n)
       } catch { /* a file being rotated, or the gateway stopping */ }

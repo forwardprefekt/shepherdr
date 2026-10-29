@@ -287,11 +287,14 @@ describe('an agent whose turn ended', () => {
 })
 
 describe('headless reviewers', () => {
-  test('codex exec, claude -p and pi -p are; an interactive CLI or another command is not', () => {
+  test('codex exec and print-mode claude, pi and omp are; an interactive CLI or another command is not', () => {
     expect(headless(['/usr/local/bin/codex', 'exec', '-s', 'read-only', '-'])).toBe(true)
     expect(headless(['node', '/usr/lib/node_modules/@openai/codex/bin/codex.js', 'exec', '-'])).toBe(true)
     expect(headless(['claude', '-p', '--model', 'opus'])).toBe(true)
     expect(headless(['pi', '--print'])).toBe(true)
+    expect(headless(['/usr/bin/omp', '-p', '--no-session', 'review'])).toBe(true)
+    expect(headless(['node', '/usr/lib/omp.js', '--print'])).toBe(true)
+    expect(headless(['omp', '--model', 'provider/model'])).toBe(false)
     expect(headless(['claude', '--settings', 'x.json'])).toBe(false)
     expect(headless(['codex', 'resume'])).toBe(false)
     expect(headless(['grep', 'codex', 'exec'])).toBe(false)
@@ -306,10 +309,12 @@ describe('headless reviewers', () => {
     put(10, ['codex', 'exec', '-'], ['HOME=/h', 'SHEPHERDR_CHAT=T-1/Agent'])
     put(11, ['claude', '--settings', 'x'], ['SHEPHERDR_CHAT=T-2/Agent'])
     put(12, ['claude', '-p'], ['HOME=/h'])
+    put(13, ['omp', '-p', '--no-session', 'review'], ['SHEPHERDR_CHAT=T-4/Agent'])
     mkdirSync(join(proc, 'self'))
     const r = new Reviewers(proc)
     expect(r.runs('T-1/Agent')).toBe(true)
     expect(r.runs('T-2/Agent')).toBe(false)
+    expect(r.runs('T-4/Agent')).toBe(true)
   })
   test('with no /proc (macOS) they are found in ps, which prints each command with its environment after it', () => {
     const ps = [
@@ -317,11 +322,13 @@ describe('headless reviewers', () => {
       'claude --settings /h/x.json SHEPHERDR_CHAT=T-2/Agent',
       'claude -p --model opus HOME=/Users/e',
       'grep codex exec SHEPHERDR_CHAT=T-3/Agent',
+      'omp --print HOME=/Users/e SHEPHERDR_CHAT=T-4/Agent',
     ].join('\n')
     const r = new Reviewers('/no/proc/here', () => ps)
     expect(r.runs('T-1/Agent')).toBe(true)
     expect(r.runs('T-2/Agent')).toBe(false)
     expect(r.runs('T-3/Agent')).toBe(false)
+    expect(r.runs('T-4/Agent')).toBe(true)
     expect(new Reviewers('/no/proc/here', () => { throw new Error('no ps') }).runs('T-1/Agent')).toBe(false)
   })
 })

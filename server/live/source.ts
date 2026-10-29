@@ -1012,7 +1012,8 @@ export class LiveSource extends Emitter<SourceEvents> implements Source {
       if (!repo) throw new Error('Isolated Autopilot needs a repository space. Home-space Autopilot is unavailable.')
       G.guardBrokerRepo(repo)
       G.guardBrokerRepo(spec.cwd)
-      const box = await this.pilotRuntime.prepare(spec, r, repo, (args, ctx) => this.pilotCli(r, args, ctx), (spec.key.includes('/') ? this.engine.task(spec.key.split('/')[0])?.reviewer?.kind : undefined) ?? r.config.reviewer?.kind)
+      const reviewer = spec.key.includes('/') ? this.engine.task(spec.key.split('/')[0])?.reviewer : undefined
+      const box = await this.pilotRuntime.prepare(spec, r, repo, (args, ctx) => this.pilotCli(r, args, ctx), reviewer?.kind ?? r.config.reviewer?.kind, undefined, reviewer ? reviewer.model ?? null : undefined)
       this.pilotSandboxes.set(spec.key, box)
       return { ...spec, env: { ...spec.env, ...box.env }, isolation: { run: r.id, home: box.logsHome, captures: box.captures, control: join(dirname(box.logsHome), 'control'), path: box.wrapper }, fresh: spec.fresh || this.agents.record(spec.key)?.isolation?.run !== r.id }
     }

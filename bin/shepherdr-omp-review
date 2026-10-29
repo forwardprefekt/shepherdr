@@ -1,0 +1,87 @@
+#!/usr/bin/env perl
+# A fresh OMP reviewer without the user's plugins, MCP servers or other provider credentials.
+use strict;
+use warnings;
+use JSON::PP qw(decode_json encode_json);
+use File::Temp qw(tempdir);
+use File::Path qw(make_path remove_tree);
+use IPC::Open3;
+
+my ($model, $thinking);
+while (@ARGV && $ARGV[0] ne '--') {
+  my $opt = shift @ARGV;
+  die "Expected --model, --thinking or --\n" unless $opt eq '--model' || $opt eq '--thinking';
+  die "Missing value for $opt\n" unless @ARGV;
+  if ($opt eq '--model') { $model = shift @ARGV } else { $thinking = shift @ARGV }
+}
+shift @ARGV if @ARGV && $ARGV[0] eq '--';
+die "Usage: shepherdr-omp-review [--model provider/model] [--thinking level] -- prompt\n" unless @ARGV == 1;
+my $prompt = $ARGV[0];
+my $home = $ENV{HOME} or die "HOME is required\n";
+my $isolated = -x '/run/shepherdr/omp-native';
+my $omp = $isolated ? '/run/shepherdr/omp-native' : 'omp';
+my $agent_dir = $isolated ? "$home/.omp/agent" : ($ENV{PI_CODING_AGENT_DIR} || "$home/.omp/agent");
+$ENV{PI_CODING_AGENT_DIR} = $agent_dir;
+
+sub capture {
+  my (@args) = @_;
+  open my $out, '-|', @args or die "Cannot start OMP: $!\n";
+  local $/;
+  my $text = <$out>;
+  close $out or die "OMP command failed\n";
+  return $text;
+}
+if (!$model && $isolated) {
+  open my $selected, '<', '/run/shepherdr/omp-reviewer-model' or die "Missing isolated reviewer model\n";
+  $model = <$selected>;
+  close $selected;
+  chomp $model if defined $model;
+}
+if (!$model) {
+  my $roles = decode_json(capture($omp, 'config', 'get', 'modelRoles', '--json'));
+  $model = $roles->{value}{default};
+}
+die "OMP reviewer needs a fully qualified provider/model\n" unless defined $model && $model =~ m{\A([\w.-]+)/[^/\s]+\z};
+my $provider = $1;
+my $export = decode_json(capture($omp, 'auth', 'export'));
+die "Unexpected OMP credential export\n" unless ref($export->{credentials}) eq 'ARRAY';
+my @credentials = grep { ref($_) eq 'HASH' && ($_->{provider} // '') eq $provider } @{$export->{credentials}};
+die "OMP reviewer requires exactly one credential for $provider\n" unless @credentials == 1;
+die "OMP reviewer requires an API key; OAuth credentials cannot be safely copied\n" unless ref($credentials[0]{credential}) eq 'HASH' && ($credentials[0]{credential}{type} // '') eq 'api_key';
+my $auth = encode_json({ version => 1, credentials => \@credentials });
+undef $export;
+@credentials = ();
+
+my $tmp = tempdir('shepherdr-omp-review-XXXXXX', TMPDIR => 1, CLEANUP => 0);
+END { remove_tree($tmp) if defined $tmp && -d $tmp }
+chmod 0700, $tmp or die "Cannot secure temporary home\n";
+my $cleanup = sub { remove_tree($tmp) if -d $tmp };
+$SIG{TERM} = sub { $cleanup->(); exit 143 };
+$SIG{INT} = sub { $cleanup->(); exit 130 };
+my $dir = "$tmp/.omp/agent";
+make_path($dir, { mode => 0700 });
+my $config = "$tmp/reviewer.yml";
+open my $cfg, '>', $config or die "Cannot write reviewer config: $!\n";
+print $cfg "autoResume: false\nmcp:\n  enableProjectConfig: false\n";
+close $cfg or die "Cannot write reviewer config: $!\n";
+my $sessions = "$agent_dir/sessions/reviewers";
+make_path($sessions, { mode => 0700 });
+my %env = map { exists $ENV{$_} ? ($_ => $ENV{$_}) : () } qw(PATH LANG LC_ALL SHEPHERDR_CHAT HTTP_PROXY HTTPS_PROXY ALL_PROXY NO_PROXY http_proxy https_proxy all_proxy no_proxy NODE_USE_ENV_PROXY);
+$env{HOME} = $tmp;
+$env{XDG_CONFIG_HOME} = "$tmp/.config";
+$env{PI_CODING_AGENT_DIR} = $dir;
+local %ENV = %env;
+my $pid = open3(my $in, my $out, '>&STDERR', $omp, 'auth', 'import', '-');
+print $in $auth or die "Cannot pass OMP credential\n";
+close $in;
+undef $auth;
+{ local $/; <$out> }
+waitpid($pid, 0);
+if ($? != 0) { $cleanup->(); die "OMP could not import the selected API key\n" }
+my @cmd = ($omp, '-p', '--config', $config, '--no-extensions', '--tools', 'read,grep,glob', '--session-dir', $sessions, '--model', $model);
+push @cmd, '--thinking', $thinking if defined $thinking && length $thinking;
+push @cmd, $prompt;
+system @cmd;
+my $status = $?;
+$cleanup->();
+exit($status == -1 ? 1 : $status & 127 ? 128 + ($status & 127) : $status >> 8);

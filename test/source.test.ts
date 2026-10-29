@@ -400,7 +400,7 @@ describe("a task's CLI, model and effort", () => {
     execSync('git init -q -b main && git config user.email t@t && git config user.name T && echo hi > README.md && git add -A && git commit -qm init', { cwd: dir, shell: '/bin/sh' })
     const place = placeId.space((await src.places.add(dir, 'reviewer-source')).name)
     for (const [args, says] of <[string[], string][]>[
-      [['--reviewer', 'gemini'], '--reviewer gemini: Pick one of: Codex · Claude Code · pi.'],
+      [['--reviewer', 'gemini'], '--reviewer gemini: Pick one of: Codex · Claude Code · pi · Oh My Pi.'],
       [['--reviewer-effort', 'extreme'], '--reviewer-effort takes default, low, medium, high, xhigh, max, ultra on Codex'],
       [['--reviewer-model', 'opus'], 'Codex has no such model'],
     ]) {
@@ -419,6 +419,9 @@ describe("a task's CLI, model and effort", () => {
     expect(own.desc).toContain('- Reviewer: a headless Claude Code or a Claude Code subagent (its default model, high effort). (set by coordinator for this task)')
     const codex = src.engine.task(id((await src.cli(['task', 'add', 'Codex review', '--desc', 'x', '--reviewer-effort', 'low'], { chat: place })).out))!
     expect(codex.desc).toContain('- Reviewer: a headless Codex or a Codex subagent (model gpt-6-sol, low effort). (set by coordinator for this task)')
+    const omp = src.engine.task(id((await src.cli(['task', 'add', 'OMP review', '--desc', 'x', '--reviewer', 'omp'], { chat: place })).out))!
+    expect(omp.reviewer).toEqual({ kind: 'omp', model: undefined, effort: undefined })
+    expect(omp.desc).toContain('- Reviewer: a headless Oh My Pi or an Oh My Pi subagent (its default model and effort). (set by coordinator for this task)')
     src.settings.set('reviewer.model', null)
   })
   test('task add --set changes a line of its Settings block for that task alone, marked as set by its coordinator', async () => {

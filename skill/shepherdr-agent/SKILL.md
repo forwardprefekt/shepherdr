@@ -43,9 +43,16 @@ build, check and review the work is your own judgment.
    card with your recommended choice first, then end your turn (a turn ended without `ready` and nothing running in
    the background shows Needs you). Decide the rest yourself and list those decisions in the facts.
 3. **Review**, unless Review is off or the brief says none: fresh eyes that didn't write the change (a subagent, or
-   a headless `codex exec`, `claude -p` or `pi -p` as the Reviewer setting suggests). Run a headless one in the
+   a headless `codex exec`, `claude -p`, `pi -p` or `omp -p` as the Reviewer setting suggests). Run a headless one in the
    foreground, its stdin closed (or it waits on stdin forever) and under a timeout, with your shell's timeout at its
-   most: `timeout 540 codex exec -s read-only -o <out> "<prompt>" < /dev/null`. Never in the background, and never end
+   most: `timeout 540 codex exec -s read-only -o <out> "<prompt>" < /dev/null`. For Oh My Pi, use
+   `timeout 540 "$(dirname "$SHEPHERDR_COMMAND")/shepherdr-omp-review" -- "<prompt>" < /dev/null > <out>`.
+   Before `--`, pass `--model provider/model` and `--thinking <level>` when selected. The helper requires exactly one
+   stored API key for that provider; it refuses OAuth and ambiguous credentials rather than copying refresh tokens.
+   Its private OMP home and config disable project MCP and extensions, while retaining the session for usage accounting.
+   Include the diff in the prompt: the read-only tools cannot run Git or send chat commands. Read the output file
+   yourself and carry its findings into the task's normal facts and chat. Never auto-approve tools or enable write or
+   shell tools for the reviewer. Never in the background, and never end
    your turn while a review runs. Timed out or failed: one subagent review instead. Give it the authoritative command from your launch prompt and `SHEPHERDR_CHAT=<task-id>/Reviewer` (never an inherited other task), the brief, the diff and the
    repo's rules, never your own reasoning; ask for what this change
    broke, left undone or added beyond the brief, each with proof and tagged critical (breaks or loses users' work),

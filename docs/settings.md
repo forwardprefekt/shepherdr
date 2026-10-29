@@ -24,7 +24,11 @@
 - Interactive task, coordinator and backup chat choices require both runtime log discovery and a chat reader.
   Settings and Restart offer Claude Code, Codex, pi and Oh My Pi; other herdr CLIs are refused before a chat launch because
   their replies cannot be shown. Existing saved choices are kept, but an unsupported choice must be changed before
-  launching again. Headless reviewer choices are separate; this does not add or prove support for other reviewers.
+  launching again. Headless reviewer choices are separate: Codex, Claude Code, pi and Oh My Pi. An Oh My Pi review
+  uses a private OMP home and a read-only tool list, disables project MCP and extension discovery, and retains its
+  session for usage accounting. It requires a fully qualified provider/model (or OMP default) and exactly one stored
+  API-key credential for that provider. OAuth and multiple credentials are refused to avoid disrupting sign-in. The
+  task agent reads the output and reports findings in the normal task facts and chat; a failed review uses a subagent.
 
 ## Private instructions
 

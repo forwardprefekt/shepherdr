@@ -644,7 +644,7 @@ export class Chats {
     if (r?.kind === 'claude' && st !== 'working' && st !== 'blocked' && !this.agents.stillRuns(key)) list = []
     const heads = this.agents.reviewers.list(key).map((h) => headlessJob(h, r?.logs ?? []))
     // a headless agent run as a background shell is the agent, once
-    if (heads.length) list = list.filter((j) => j.kind !== 'shell' || !/\b(codex (exec|e)|(claude|pi)\b.* (-p|--print))\b/.test(j.title))
+    if (heads.length) list = list.filter((j) => j.kind !== 'shell' || !/\b(codex (exec|e)|(claude|pi|omp)\b.* (-p|--print))\b/.test(j.title))
     list.push(...heads)
     for (const j of list) {
       if (j.kind === 'agent' && !j.log && r?.kind === 'codex' && !r.isolation) {

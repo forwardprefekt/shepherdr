@@ -6,7 +6,7 @@ import { appendFileSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { glance, jobsWords, rowsOf, say, testResult, took } from '../shared/activity.ts'
-import { activityOf, cutOutput, lineOf } from '../server/live/activity.ts'
+import { activityOf, cutOutput, headlessJob, lineOf } from '../server/live/activity.ts'
 import { ClaudeReader, readerFor } from '../server/live/readers/index.ts'
 import { notices } from '../server/live/readers/claude.ts'
 import { claudeStep, codexItem, commandSay, commandWords } from '../server/live/readers/steps.ts'
@@ -15,6 +15,11 @@ import type { LogEvent } from '../server/live/readers/types.ts'
 
 process.env.SHEPHERDR_HOME ??= mkdtempSync(join(tmpdir(), 'shep-act-'))
 const { Chats } = await import('../server/live/chats.ts')
+
+test('an OMP print reviewer is described as headless work', () => {
+  const job = headlessJob({ argv: ['omp', '-p', '--no-session', 'Review the change'], at: 42 }, [])
+  expect(job).toMatchObject({ kind: 'headless', title: 'omp -p: Review the change', at: 42 })
+})
 
 describe('words', () => {
   test('an action said as a command reads done and doing; a word that is no verb stays', () => {

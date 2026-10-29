@@ -708,11 +708,11 @@ export class Agents extends Emitter<Events> {
     if (!r) return
     const since = r.started - 5000
     if (r.isolation) {
-      const dir = join(r.isolation.captures ?? r.isolation.home, r.kind === 'claude' ? '.claude/projects' : r.kind === 'codex' ? '.codex/sessions' : '.pi/agent/sessions')
+      const dir = join(r.isolation.captures ?? r.isolation.home, r.kind === 'claude' ? '.claude/projects' : r.kind === 'codex' ? '.codex/sessions' : r.kind === 'omp' ? '.omp/agent/sessions' : '.pi/agent/sessions')
       if (!r.isolation.captures || !privateRuntimePath(r.isolation.captures, dir)) return
       const files = Array.from(new Bun.Glob('**/*.jsonl').scanSync({ cwd: dir, absolute: true, onlyFiles: true, throwErrorOnBrokenSymlink: false })).filter((f) => privateRuntimePath(r.isolation!.captures!, f) && statSync(f).mtimeMs >= since).sort((a,b) => statSync(b).mtimeMs - statSync(a).mtimeMs)
       const f = files.find((f) => !f.includes('/subagents/') && (r.kind === 'codex' ? mainCodexLog(f, r.cwd, true) : !r.sessionId || f.endsWith(`${r.sessionId}.jsonl`)))
-      if (f && addLog(r, f)) { this.save(); this.emit('logs', key) }
+      if (f && addLog(r, f)) { if (r.kind === 'omp') r.sessionId = f.match(/([0-9a-f-]{36})\.jsonl$/i)?.[1] ?? r.sessionId; this.save(); this.emit('logs', key) }
       return
     }
     const f = r.kind === 'claude' ? (r.sessionId ? claudeLogPath(r.cwd, r.sessionId) : findClaudeLog(r.cwd, since)) : r.kind === 'codex' ? findCodexLog(r.cwd, since) : r.kind === 'pi' ? findPiLog(r.cwd, since) : r.kind === 'omp' ? findOmpLog(r.cwd, since, r.sessionId) : undefined
@@ -880,9 +880,9 @@ export class Agents extends Emitter<Events> {
       if (effort) a.push('--thinking', effort)
     } else if (r.kind === 'omp') {
       // Never let a fresh Shepherdr agent inherit an unrelated terminal's auto-resumed session.
-      const config = `${promptPath(r.name)}.omp.yml`
-      task.mkdirSync(dirname(config), { recursive: true })
-      task.writeFileSync(config, 'autoResume: false\n')
+      const config = r.isolation ? '/run/shepherdr/omp.yml' : `${promptPath(r.name)}.omp.yml`
+      if (!r.isolation) { task.mkdirSync(dirname(config), { recursive: true }); task.writeFileSync(config, 'autoResume: false\n') }
+      if (r.isolation) a.push('--no-extensions')
       a.push('--config', config)
       const id = r.sessionId ?? r.logs.findLast((f) => logKind(f) === 'omp')?.match(/([0-9a-f-]{36})\.jsonl$/i)?.[1]
       if (resume && id) a.push('--resume', id)

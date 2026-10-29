@@ -533,7 +533,7 @@ describe('settings', () => {
     expect(s.set('task.effort', 'extreme').ok).toBe(false)
     expect(s.set('watcher.agent', 'Claude Code').error).toBe('No setting watcher.agent')
     // a reviewer needs a headless run review.sh knows
-    expect(s.set('reviewer.agent', 'Qwen').error).toBe('Pick one of: Codex · Claude Code · pi.')
+    expect(s.set('reviewer.agent', 'Qwen').error).toBe('Pick one of: Codex · Claude Code · pi · Oh My Pi.')
     // a model or effort level the CLI (and its model) doesn't take, with what it does
     expect(s.set('coordinator.model', 'opus 9').error).toBe('Claude Code has no model opus 9. Pick one of: default · Fable 5.1 · Opus 5.5 · Sonnet 5.5 · Haiku 5.5.')
     expect(s.set('coordinator.model', 'Opus 5.5').ok).toBe(true)
@@ -566,6 +566,10 @@ describe('settings', () => {
     s.set('reviewer.effort', 'high')
     expect(s.harness('reviewer')).toEqual({ kind: 'claude', model: undefined, effort: 'high' })
     expect(s.sections([], [], null).find((x) => x.name === 'How tasks work')!.note).toContain("- Reviewer: a headless Claude Code or a Claude Code subagent (its default model, high effort). (your setting for every machine)")
+    expect(s.set('reviewer.agent', 'omp').ok).toBe(true)
+    expect(s.get('reviewer.agent')).toBe('Oh My Pi')
+    expect(s.harness('reviewer').kind).toBe('omp')
+    expect(s.sections([], [], null).find((x) => x.name === 'How tasks work')!.note).toContain('Reviewer: a headless Oh My Pi or an Oh My Pi subagent')
     for (const k of ['reviewer.agent', 'reviewer.effort']) s.set(k, null)
   })
   test("each CLI and model takes its own levels: one it lacks goes in as the nearest it has", () => {

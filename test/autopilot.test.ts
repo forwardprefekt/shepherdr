@@ -3,10 +3,12 @@ import { afterEach, describe, expect, spyOn, test } from 'bun:test'
 import { mkdtempSync, mkdirSync, writeFileSync, utimesSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { Database } from 'bun:sqlite'
 process.env.SHEPHERDR_HOME = mkdtempSync(join(tmpdir(), 'shep-pilot-test-'))
 process.env.HERDR_SOCKET_PATH = join(process.env.SHEPHERDR_HOME, 'absent.sock')
 const { PilotRuns, AUTOPILOT_KINDS, hostList, pilotCommand, pilotProblem, reserveTraffic } = await import('../server/live/autopilot.ts')
-const { sandboxArgs, publicAddress, providerConfig, capturedTranscript } = await import('../server/live/autopilot-sandbox.ts')
+const { sandboxArgs, publicAddress, providerConfig, capturedTranscript, ompRoleModels } = await import('../server/live/autopilot-sandbox.ts')
+const { ompCredentials } = await import('../server/live/omp-credentials.ts')
 const { Settings } = await import('../server/live/settings.ts')
 const { herdr } = await import('../server/live/herdr.ts')
 const { Agents, isolatedReady, isolatedShell } = await import('../server/live/agents.ts')
@@ -72,7 +74,7 @@ function world(kind = 'codex') {
 }
 
 describe('capabilities and exact launch settings', () => {
-  test.each(['claude', 'codex', 'pi'])('%s launch replaces a profile-altered PATH before starting an agent', async (kind) => {
+  test.each(['claude', 'codex', 'pi', 'omp'])('%s launch replaces a profile-altered PATH before starting an agent', async (kind) => {
     const commands: string[] = [], wrapper = `/trusted/launcher/${kind}`
     let polls = 0
     const io = {
@@ -88,7 +90,7 @@ describe('capabilities and exact launch settings', () => {
     expect(commands).toEqual(["exec /usr/bin/env PATH='/trusted/launcher:/usr/local/bin:/usr/bin:/bin' ENV=/dev/null /bin/sh -i"])
     await expect(isolatedShell('pane', wrapper, { ...io, read: () => 'unverified' })).rejects.toThrow('No agent was started')
   })
-  test.each(['claude', 'codex', 'pi'])('%s only reports startup once that exact adapter accepts input', async (kind) => {
+  test.each(['claude', 'codex', 'pi', 'omp'])('%s only reports startup once that exact adapter accepts input', async (kind) => {
     const seen = [undefined, { agent: kind, interactive_ready: false }, { agent: kind, interactive_ready: true }]
     let polls = 0
     await isolatedReady(kind, async () => { polls++; return seen.shift() }, async () => {}, 3)
@@ -96,7 +98,7 @@ describe('capabilities and exact launch settings', () => {
     await expect(isolatedReady(kind, async () => ({ agent: 'unrelated', interactive_ready: true }), async () => {}, 2)).rejects.toThrow('not started')
     await expect(isolatedReady(kind, async () => undefined, async () => {}, 2)).rejects.toThrow('not started')
   })
-  test.each(['claude', 'codex', 'pi'])('%s has a chat adapter; other Herdr CLIs fail closed', (kind) => {
+  test.each(['claude', 'codex', 'pi', 'omp'])('%s has a chat adapter; other Herdr CLIs fail closed', (kind) => {
     expect(AUTOPILOT_KINDS).toContain(kind)
     expect(pilotProblem(kind)).toBeUndefined()
     expect(pilotProblem('cursor')).toContain('chat')
@@ -184,7 +186,7 @@ describe('fresh replacement, failures and worker ownership', () => {
       expect(a.waiting(key)).toHaveLength(0)
     } finally { prompt.mockRestore(); timer.mockRestore(); a.stop() }
   })
-  test.each(['claude', 'codex'])('%s ON/OFF replace one owner in the same chat', async (kind) => {
+  test.each(['claude', 'codex', 'omp'])('%s ON/OFF replace one owner in the same chat', async (kind) => {
     const w = world(kind)
     await w.internals.switchPilot(w.key, 'autopilot')
     expect(w.specs[0]).toMatchObject({ key: w.key, kind, fresh: true })
@@ -267,7 +269,7 @@ describe('trusted broker, limits and actual namespace configuration', () => {
     expect(() => hostList('*.example.com')).toThrow()
     expect(() => hostList('127.0.0.1')).toThrow()
   })
-  test.each(['claude', 'codex', 'pi'])('%s gets the same outer sandbox with no unrestricted shell escape', (kind) => {
+  test.each(['claude', 'codex', 'pi', 'omp'])('%s gets the same outer sandbox with no unrestricted shell escape', (kind) => {
     const args = sandboxArgs({ cwd: '/work/task', repo: '/repo', home: '/private-home', state: '/fixture/state', control: '/fixture/control', binary: '/usr/bin/fake', bun: '/usr/bin/bun', kind, writable: true, git: ['/work/task/.git'] })
     expect(args).toContain('--unshare-all')
     expect(args).toContain('--clearenv')
@@ -294,6 +296,74 @@ describe('trusted broker, limits and actual namespace configuration', () => {
     expect(claude).not.toContain('unrestricted-shell')
     expect(claude).not.toContain('UNRELATED_SECRET')
     expect(claude).not.toContain('mcpServers')
+  })
+  test('OMP selects only the requested provider credentials, not database settings or MCP credentials', () => {
+    const home = mkdtempSync(join(tmpdir(), 'pilot-omp-auth-')), dir = join(home, '.omp/agent')
+    mkdirSync(dir, { recursive: true })
+    writeFileSync(join(dir, 'config.yml'), 'modelRoles:\n  default: openai-codex/example\nextensions:\n  - /host/unsafe\n')
+    const db = new Database(join(dir, 'agent.db'))
+    db.run('CREATE TABLE auth_credentials (provider TEXT, credential_type TEXT, data TEXT, disabled_cause TEXT)')
+    const insert = db.query('INSERT INTO auth_credentials VALUES (?, ?, ?, ?)')
+    insert.run('openai-codex', 'api_key', '{"key":"chosen","refresh":"must-not-copy"}', null)
+    insert.run('mcp_oauth:profile:default:host', 'oauth', '{"access":"mcp-secret"}', null)
+    insert.run('other', 'api_key', '{"key":"other-secret"}', null)
+    insert.run('oauth-provider', 'oauth', '{"refresh":"host-refresh-token"}', null)
+    insert.run('unknown-provider', 'other', '{"secret":"unsupported"}', null)
+    db.close()
+    const result = ompCredentials(home, [undefined])
+    expect(result.model).toBe('openai-codex/example')
+    expect(ompCredentials(home, ['other/work', undefined]).models).toEqual(['other/work', 'openai-codex/example'])
+    expect(result.credentials).toContain('chosen')
+    expect(result.credentials).not.toContain('must-not-copy')
+    expect(result.credentials).not.toContain('mcp-secret')
+    expect(result.credentials).not.toContain('other-secret')
+    expect(result.credentials).not.toContain('/host/unsafe')
+    expect(() => ompCredentials(home, ['ambiguous'])).toThrow('fully qualified')
+    expect(() => ompCredentials(home, ['other-provider/model'])).toThrow('no stored credentials')
+    expect(() => ompCredentials(home, ['oauth-provider/model'])).toThrow('OAuth refresh tokens')
+    expect(() => ompCredentials(home, ['other/review', 'oauth-provider/model'])).toThrow('store an API key')
+    expect(() => ompCredentials(home, ['unknown-provider/model'])).toThrow('non-API-key')
+    // A non-OMP coordinator does not require the host default when its OMP reviewer names a model.
+    writeFileSync(join(dir, 'config.yml'), 'extensions:\n  - /host/unsafe\n')
+    const reviewerModels = ompRoleModels({ kind: 'codex', model: 'irrelevant' }, 'omp', 'other/review')
+    expect(reviewerModels).toEqual(['other/review'])
+    expect(ompCredentials(home, reviewerModels).credentials).toContain('other-secret')
+    expect(ompRoleModels({ kind: 'omp', model: 'openai-codex/work' }, 'omp', 'other/review')).toEqual(['openai-codex/work', 'other/review'])
+    expect(ompRoleModels({ kind: 'omp', model: 'openai-codex/work' }, 'codex', 'other/review')).toEqual(['openai-codex/work'])
+    expect(() => ompCredentials(home, ompRoleModels({ kind: 'codex' }, 'omp'))).toThrow('OMP default model')
+    const more = new Database(join(dir, 'agent.db'))
+    more.query('INSERT INTO auth_credentials VALUES (?, ?, ?, ?)').run('other', 'api_key', '{"key":"disabled"}', 'disabled')
+    more.close()
+    expect(ompCredentials(home, reviewerModels).credentials).not.toContain('disabled')
+    const multiple = new Database(join(dir, 'agent.db'))
+    multiple.query('INSERT INTO auth_credentials VALUES (?, ?, ?, ?)').run('other', 'api_key', '{"key":"second"}', null)
+    multiple.close()
+    expect(() => ompCredentials(home, reviewerModels)).toThrow('multiple credentials')
+  })
+  test('OMP isolates its config, discovers only the main transcript and accounts for subagents and side requests', () => {
+    const a = new Agents(), run = 'omp-usage-fixture', captures = join(HOME, 'autopilot-runtime', run, 'coordinator/captures')
+    const id = '00000000-0000-4000-8000-000000000001'
+    const main = capturedTranscript(captures, 'omp', `.omp/agent/sessions/-project/time_${id}.jsonl`)
+    const child = capturedTranscript(captures, 'omp', '.omp/agent/sessions/-project/session/worker.jsonl')
+    const reviewer = capturedTranscript(captures, 'omp', '.omp/agent/sessions/reviewers/review.jsonl')
+    for (const f of [main, child, reviewer]) mkdirSync(join(f, '..'), { recursive: true })
+    writeFileSync(main, JSON.stringify({ type: 'message', id: 'm1', message: { role: 'assistant', content: [{ type: 'text', text: 'done' }], usage: { totalTokens: 7 } } }) + '\n' + JSON.stringify({ type: 'model_usage', id: 'side', usage: { totalTokens: 3 } }) + '\n')
+    writeFileSync(child, JSON.stringify({ type: 'message', id: 'm1', message: { role: 'assistant', usage: { totalTokens: 5 } } }) + '\n')
+    writeFileSync(reviewer, JSON.stringify({ type: 'model_usage', id: 'review', usage: { totalTokens: 2 } }) + '\n')
+    utimesSync(child, new Date(), new Date(Date.now() + 1000))
+    a.records.main = { key: 'main', name: 'main', kind: 'omp', cwd: '/fixture', workspace: 'fixture', logs: [], started: Date.now(), isolation: { run, home: '/absent', captures, control: '/absent', path: '/absent' } }
+    try {
+      a.discoverLog('main')
+      expect(a.record('main')!.logs).toEqual([main])
+      expect(a.record('main')!.sessionId).toBe(id)
+      const flags = a.args(a.record('main')!, true)
+      expect(flags).toContain('--no-extensions')
+      expect(flags).toContain('/run/shepherdr/omp.yml')
+      expect(flags).toContain(id)
+      const usage = new PilotUsage()
+      expect(usage.tokens(run)).toBe(17)
+      expect(usage.tokens(run)).toBe(17)
+    } finally { a.stop() }
   })
   test('all coordinator/worker/reviewer transcripts contribute without offset-id collisions', () => {
     const run = 'usage-fixture', root = join(HOME, 'autopilot-runtime', run)

@@ -122,6 +122,7 @@ function browserBinary(os: string, arch: string) {
 export function helperFiles(os: string, arch: string): [string, string][] {
   const files: [string, string][] = [
     ['bin/shepherdr', join(ROOT, 'helper', 'shepherdr')],
+    ['bin/shepherdr-omp-review', join(ROOT, 'bin', 'shepherdr-omp-review')],
     ['route.pl', join(ROOT, 'helper', 'route.pl')],
     ['hook.pl', join(ROOT, 'helper', 'hook.pl')],
     ['mirror.pl', join(ROOT, 'helper', 'mirror.pl')],
@@ -204,7 +205,7 @@ export async function installHelper(target: string, p: Probe) {
   const keep = !!browser && p.browser === browser
   const dir = helperDir(p.home)
   const tar = tarOf(helperFiles(p.os, p.arch).filter(([to]) => !(keep && to === 'bin/agent-browser-bin')), version, browser)
-  const clear = keep ? '"$d/skill" "$d/bin/shepherdr" "$d/bin/agent-browser"' : '"$d/skill" "$d/bin"'
+  const clear = keep ? '"$d/skill" "$d/bin/shepherdr" "$d/bin/shepherdr-omp-review" "$d/bin/agent-browser"' : '"$d/skill" "$d/bin"'
   const r = await onMachine(target, `set -e; d=${q(dir)}; mkdir -p "$d"; rm -rf ${clear}; tar xf - -C "$d"; mkdir -p "$d/hooks" "$d/inbox" "$d/prompts"`, { stdin: tar, timeoutMs: 180_000 })
   if (r.code !== 0) throw new Error(`Could not put the helper on the machine: ${r.err || `exit ${r.code}`}`)
   return version

@@ -10,6 +10,7 @@ import { dirname, join, resolve } from 'node:path'
 import { homedir, tmpdir } from 'node:os'
 import { HOME } from '../store.ts'
 import { ROOT } from '../root.ts'
+import { ompCredentials } from './omp-credentials.ts'
 import { BOX, q } from './box.ts'
 import { reserveTraffic, pilotCommand, pilotProblem, type PilotRun } from './autopilot.ts'
 import type { Spec } from './agents.ts'
@@ -43,7 +44,8 @@ export function sandboxArgs(o: { cwd: string; repo: string; home: string; state:
 export function capturedTranscript(root: string, kind: string, file: string) {
   const uuid = file.match(/([0-9a-f]{8}-[0-9a-f-]{27})\.jsonl$/i)?.[1]
   const name = createHash('sha256').update(file).digest('hex').slice(0, 24) + (uuid ? `-${uuid}` : '') + '.jsonl'
-  return join(root, kind === 'claude' ? '.claude/projects' : kind === 'codex' ? '.codex/sessions' : '.pi/agent/sessions', file.includes('/subagents/') ? 'subagents' : '', name)
+  const nested = kind === 'omp' && (file.startsWith('.omp/agent/sessions/reviewers/') || file.replaceAll('\\', '/').split('/').length > 5)
+  return join(root, kind === 'claude' ? '.claude/projects' : kind === 'codex' ? '.codex/sessions' : kind === 'omp' ? '.omp/agent/sessions' : '.pi/agent/sessions', file.includes('/subagents/') || nested ? 'subagents' : '', name)
 }
 function privateDestination(root: string, file: string) {
   const parts = file.slice(root.length + 1).split('/')
@@ -106,7 +108,13 @@ export function providerConfig(kind: string, text: string) {
   return JSON.stringify(Object.fromEntries(Object.entries(input).filter(([k]) => ['model', 'provider', 'thinkingLevel'].includes(k))))
 }
 
-export async function prepareSandbox(spec: Spec, run: PilotRun, repo: string, cli: (args: string[], ctx: { chat: string; cwd: string; stdin?: string }) => Promise<{ out: string; code: number; secrets?: Record<string, string> }>, reviewerKind?: string, fixture?: { providerHome: string; executable: (kind: string) => string | null }): Promise<SandboxLaunch> {
+/** Only OMP roles contribute a provider requirement; an unset OMP model uses its own default. */
+export function ompRoleModels(spec: Pick<Spec, 'kind' | 'model'>, reviewerKind?: string, reviewerModel?: string): (string | undefined)[] {
+  return [...(spec.kind === 'omp' ? [spec.model] : []), ...(reviewerKind === 'omp' ? [reviewerModel] : [])]
+}
+
+
+export async function prepareSandbox(spec: Spec, run: PilotRun, repo: string, cli: (args: string[], ctx: { chat: string; cwd: string; stdin?: string }) => Promise<{ out: string; code: number; secrets?: Record<string, string> }>, reviewerKind?: string, fixture?: { providerHome: string; executable: (kind: string) => string | null }, reviewerModel?: string | null): Promise<SandboxLaunch> {
   const problem = pilotProblem(spec.kind) ?? (reviewerKind ? pilotProblem(reviewerKind) : undefined)
   if (problem) throw new Error(problem)
   const bwrap = await sandboxAvailable()
@@ -123,6 +131,7 @@ export async function prepareSandbox(spec: Spec, run: PilotRun, repo: string, cl
   // Only the chosen providers' own configuration/login files. Never mount the real home or arbitrary accounts.
   const kinds = [...new Set([spec.kind, reviewerKind].filter((k): k is string => !!k))]
   for (const kind of kinds) {
+    if (kind === 'omp') continue
     const configs = kind === 'codex' ? ['.codex/auth.json', '.codex/config.toml'] : kind === 'claude' ? ['.claude/.credentials.json', '.claude/settings.json'] : ['.pi/agent/auth.json', '.pi/agent/models.json', '.pi/agent/settings.json']
     for (const name of configs) {
       const src = join(fixture?.providerHome ?? homedir(), name), dst = join(state, name)
@@ -132,6 +141,19 @@ export async function prepareSandbox(spec: Spec, run: PilotRun, repo: string, cl
       if (name.endsWith('config.toml') || name.endsWith('settings.json')) writeFileSync(dst, providerConfig(kind, readFileSync(src, 'utf8')), { mode: 0o600 })
       else copyFileSync(src, dst)
     }
+  }
+  if (kinds.includes('omp')) writeFileSync(join(control, 'omp-native'), '')
+  if (reviewerKind === 'omp') writeFileSync(join(control, 'bin/shepherdr-omp-review'), readFileSync(join(ROOT, 'bin/shepherdr-omp-review')), { mode: 0o500 })
+  if (kinds.includes('omp')) {
+    const omp = ompCredentials(fixture?.providerHome ?? homedir(), ompRoleModels(spec, reviewerKind, reviewerModel === undefined ? run.config.reviewer?.model : reviewerModel ?? undefined))
+    if (reviewerKind === 'omp') writeFileSync(join(control, 'omp-reviewer-model'), omp.models.at(-1)!, { mode: 0o600 })
+    const dir = join(state, '.omp/agent')
+    privateDestination(state, dir)
+    mkdirSync(dir, { recursive: true, mode: 0o700 })
+    privateDestination(state, join(dir, 'autopilot-credentials.json'))
+    writeFileSync(join(dir, 'autopilot-credentials.json'), omp.credentials, { mode: 0o600 })
+    // An overlay wins over project config; never import host extensions, MCP, or hooks.
+    writeFileSync(join(control, 'omp.yml'), JSON.stringify({ autoResume: false, modelRoles: { default: omp.model }, mcp: { enableProjectConfig: false }, extensions: [], tools: { approvalMode: 'yolo' } }), { mode: 0o600 })
   }
   // Scripts are copied once to the read-only control mount; worktree edits cannot change trusted broker code.
   copyFileSync(join(ROOT, 'helper/autopilot/bootstrap.ts'), join(control, 'bootstrap.ts'))
@@ -149,7 +171,7 @@ export async function prepareSandbox(spec: Spec, run: PilotRun, repo: string, cl
       if (req.url === '/api/transcript') {
         if (!['starting', 'on', 'workers'].includes(run.state)) throw new Error('Autopilot stopped.')
         const capture = JSON.parse(body) as { kind: string; file: string; data: string; offset: number }
-        if (!['claude', 'codex', 'pi'].includes(capture.kind) || typeof capture.file !== 'string' || capture.file.length > 2048 || typeof capture.data !== 'string' || !Number.isSafeInteger(capture.offset) || capture.offset < 0) throw new Error('Invalid transcript.')
+        if (!['claude', 'codex', 'pi', 'omp'].includes(capture.kind) || typeof capture.file !== 'string' || capture.file.length > 2048 || typeof capture.data !== 'string' || !Number.isSafeInteger(capture.offset) || capture.offset < 0) throw new Error('Invalid transcript.')
         const data = Buffer.from(capture.data, 'base64')
         if (data.length > 256 * 1024) throw new Error('Transcript chunk is too large.')
         const file = capturedTranscript(captures, capture.kind, capture.file)
@@ -217,6 +239,9 @@ export async function prepareSandbox(spec: Spec, run: PilotRun, repo: string, cl
       const modules = real.includes('/node_modules/') ? real.slice(0, real.indexOf('/node_modules/') + 14) : dirname(dirname(real))
       args.splice(start, 0, '--ro-bind', modules, modules)
       writeFileSync(target, `#!/bin/sh\nexec ${q(real)} "$@"\n`, { mode: 0o500 })
+    } else if (kind === 'omp') {
+      args.splice(start, 0, '--ro-bind', real, '/run/shepherdr/omp-native')
+      writeFileSync(target, '#!/bin/sh\nexport PI_CODING_AGENT_DIR="$HOME/.omp/agent"\nmkdir -p "$PI_CODING_AGENT_DIR/sessions/reviewers"\nexec /run/shepherdr/omp-native --no-extensions --config /run/shepherdr/omp.yml --session-dir "$PI_CODING_AGENT_DIR/sessions/reviewers" "$@"\n', { mode: 0o500 })
     } else {
       writeFileSync(target, '')
       args.splice(start, 0, '--ro-bind', real, `/run/shepherdr/bin/${kind}`)

@@ -4,7 +4,7 @@ import { readJson, writeJson } from '../store.ts'
 import { CHAT_KINDS, chatProblem } from './readers/index.ts'
 import type { Harness } from './restart.ts'
 
-export const AUTOPILOT_KINDS = CHAT_KINDS.filter((k) => ['claude', 'codex', 'pi'].includes(k))
+export const AUTOPILOT_KINDS = CHAT_KINDS.filter((k) => ['claude', 'codex', 'pi', 'omp'].includes(k))
 export interface PilotConfig {
   harness: Harness
   reviewer?: Harness

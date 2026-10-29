@@ -139,7 +139,7 @@ export class ClaudeSessions {
   }
 }
 
-/** a headless one-shot of a CLI, as a task agent may run a reviewer: codex exec, claude -p, pi -p */
+/** a headless one-shot of a CLI, as a task agent may run a reviewer */
 export function headless(argv: string[]): boolean {
   const bin = (i: number) => argv[i]?.split('/').at(-1) ?? ''
   // node, bun and the like run the CLI's script: look past them
@@ -147,7 +147,7 @@ export function headless(argv: string[]): boolean {
   const cli = bin(at).replace(/\.(js|mjs|cjs)$/, '')
   const rest = argv.slice(at + 1)
   if (cli === 'codex') return rest[0] === 'exec' || rest[0] === 'e'
-  if (cli === 'claude' || cli === 'pi') return rest.includes('-p') || rest.includes('--print')
+  if (cli === 'claude' || cli === 'pi' || cli === 'omp') return rest.includes('-p') || rest.includes('--print')
   return false
 }
 
