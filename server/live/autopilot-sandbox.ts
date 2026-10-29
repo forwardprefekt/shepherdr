@@ -10,7 +10,7 @@ import { dirname, join, resolve } from 'node:path'
 import { homedir, tmpdir } from 'node:os'
 import { HOME } from '../store.ts'
 import { ROOT } from '../root.ts'
-import { ompCredentials } from './omp-credentials.ts'
+import { ompCredentials, type OmpGateway } from './omp-credentials.ts'
 import { BOX, q } from './box.ts'
 import { reserveTraffic, pilotCommand, pilotProblem, type PilotRun } from './autopilot.ts'
 import type { Spec } from './agents.ts'
@@ -21,6 +21,30 @@ export function publicAddress(ip: string) {
   if (isIP(ip) !== 4) return false
   const [a, b] = ip.split('.').map(Number)
   return !(a === 0 || a === 10 || a === 127 || a === 169 && b === 254 || a === 172 && b >= 16 && b <= 31 || a === 192 && (b === 168 || b === 0) || a === 100 && b >= 64 && b <= 127 || a >= 224)
+}
+
+export interface TrustedOmpGateway extends OmpGateway { addresses: string[] }
+/** The private exception is pinned to an actual local Tailscale node, not DNS alone. */
+export function trustedGatewayAddresses(gateways: OmpGateway[], status: unknown) {
+  if (!status || typeof status !== 'object') throw new Error('Cannot verify the OMP gateway against Tailscale status.')
+  const s = status as { Self?: unknown; Peer?: Record<string, unknown> }
+  const nodes = [s.Self, ...Object.values(s.Peer ?? {})]
+  return gateways.map((gateway) => {
+    const matches = nodes.filter((node): node is { DNSName: string; TailscaleIPs: string[] } => {
+      if (!node || typeof node !== 'object') return false
+      const n = node as { DNSName?: unknown; TailscaleIPs?: unknown }
+      return typeof n.DNSName === 'string' && n.DNSName.replace(/\.$/, '').toLowerCase() === gateway.host && Array.isArray(n.TailscaleIPs)
+    })
+    if (matches.length !== 1) throw new Error('The configured OMP gateway is not a unique node in Tailscale status.')
+    const addresses = matches[0].TailscaleIPs.filter((ip) => typeof ip === 'string' && (isIP(ip) === 4 && /^100\.(?:6[4-9]|[7-9]\d|1[01]\d|12[0-7])\./.test(ip) || isIP(ip) === 6 && /^fd7a:115c:a1e0:/i.test(ip)))
+    if (!addresses.length) throw new Error('The configured OMP gateway has no Tailscale address.')
+    return { ...gateway, addresses }
+  })
+}
+
+export function gatewayAddressAllowed(host: string, port: string, addresses: string[], gateways: TrustedOmpGateway[]) {
+  const gateway = gateways.find((g) => g.host === host && String(g.port) === port)
+  return !!gateway && addresses.length > 0 && addresses.every((ip) => gateway.addresses.includes(ip))
 }
 export function sandboxArgs(o: { cwd: string; repo: string; home: string; state: string; control: string; binary: string; kind: string; bun: string; writable: boolean; git?: string[] }) {
   const a = ['--die-with-parent', '--new-session', '--unshare-all', '--cap-drop', 'ALL', '--clearenv']
@@ -144,14 +168,27 @@ export async function prepareSandbox(spec: Spec, run: PilotRun, repo: string, cl
   }
   if (kinds.includes('omp')) writeFileSync(join(control, 'omp-native'), '')
   if (reviewerKind === 'omp') writeFileSync(join(control, 'bin/shepherdr-omp-review'), readFileSync(join(ROOT, 'bin/shepherdr-omp-review')), { mode: 0o500 })
+  let trustedGateways: TrustedOmpGateway[] = []
   if (kinds.includes('omp')) {
     const omp = ompCredentials(fixture?.providerHome ?? homedir(), ompRoleModels(spec, reviewerKind, reviewerModel === undefined ? run.config.reviewer?.model : reviewerModel ?? undefined))
+    if (omp.gateways.length) {
+      const tailscale = Bun.which('tailscale')
+      if (!tailscale) throw new Error('OMP gateway isolation requires the local Tailscale client to verify the gateway.')
+      const status = Bun.spawnSync([tailscale, 'status', '--json'], { stdout: 'pipe', stderr: 'ignore' })
+      if (status.exitCode !== 0) throw new Error('OMP gateway isolation cannot read Tailscale status.')
+      let data: unknown
+      try { data = JSON.parse(status.stdout.toString()) } catch { throw new Error('OMP gateway isolation cannot parse Tailscale status.') }
+      trustedGateways = trustedGatewayAddresses(omp.gateways, data)
+    }
     if (reviewerKind === 'omp') writeFileSync(join(control, 'omp-reviewer-model'), omp.models.at(-1)!, { mode: 0o600 })
     const dir = join(state, '.omp/agent')
     privateDestination(state, dir)
     mkdirSync(dir, { recursive: true, mode: 0o700 })
     privateDestination(state, join(dir, 'autopilot-credentials.json'))
-    writeFileSync(join(dir, 'autopilot-credentials.json'), omp.credentials, { mode: 0o600 })
+    if (omp.hasCredentials) writeFileSync(join(dir, 'autopilot-credentials.json'), omp.credentials, { mode: 0o600 })
+    else rmSync(join(dir, 'autopilot-credentials.json'), { force: true })
+    privateDestination(state, join(dir, 'models.yml'))
+    writeFileSync(join(dir, 'models.yml'), omp.modelsConfig, { mode: 0o600 })
     // An overlay wins over project config; never import host extensions, MCP, or hooks.
     writeFileSync(join(control, 'omp.yml'), JSON.stringify({ autoResume: false, modelRoles: { default: omp.model }, mcp: { enableProjectConfig: false }, extensions: [], tools: { approvalMode: 'yolo' } }), { mode: 0o600 })
   }
@@ -193,11 +230,14 @@ export async function prepareSandbox(spec: Spec, run: PilotRun, repo: string, cl
   server.on('connection', (s) => { sockets.add(s); s.on('close', () => sockets.delete(s)) })
   server.on('connect', async (req, client, head) => {
     try {
-      const [host, port] = (req.url ?? '').toLowerCase().split(':')
-      if (!['starting', 'on', 'workers'].includes(run.state) || port !== '443' || !run.config.hosts.includes(host)) throw new Error('Host is outside the permission profile.')
+      const parts = (req.url ?? '').toLowerCase().split(':')
+      if (parts.length !== 2 || !['starting', 'on', 'workers'].includes(run.state)) throw new Error('Host is outside the permission profile.')
+      const [host, port] = parts
+      const gateway = trustedGateways.some((g) => g.host === host && String(g.port) === port)
+      if (!gateway && (port !== '443' || !run.config.hosts.includes(host))) throw new Error('Host is outside the permission profile.')
       const addresses = await lookup(host, { all: true })
-      if (!addresses.length || addresses.some((a) => !publicAddress(a.address))) throw new Error('Local/private network access is blocked.')
-      const upstream = connect({ host: addresses[0].address, port: 443 })
+      if (gateway ? !gatewayAddressAllowed(host, port, addresses.map((a) => a.address), trustedGateways) : !addresses.length || addresses.some((a) => !publicAddress(a.address))) throw new Error('Local/private network access is blocked.')
+      const upstream = connect({ host: addresses[0].address, port: Number(port) })
       sockets.add(upstream); upstream.on('close', () => sockets.delete(upstream))
       upstream.on('connect', () => { client.write('HTTP/1.1 200 Connection Established\r\n\r\n'); if (head.length) { try { reserveTraffic(run, head.length); upstream.write(head) } catch { upstream.destroy(); client.destroy(); return } }
         const meter = () => new Transform({ transform(chunk, _encoding, done) { try { reserveTraffic(run, chunk.length); done(null, chunk) } catch (e) { done(e as Error) } } })

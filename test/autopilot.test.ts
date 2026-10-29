@@ -7,7 +7,7 @@ import { Database } from 'bun:sqlite'
 process.env.SHEPHERDR_HOME = mkdtempSync(join(tmpdir(), 'shep-pilot-test-'))
 process.env.HERDR_SOCKET_PATH = join(process.env.SHEPHERDR_HOME, 'absent.sock')
 const { PilotRuns, AUTOPILOT_KINDS, hostList, pilotCommand, pilotProblem, reserveTraffic } = await import('../server/live/autopilot.ts')
-const { sandboxArgs, publicAddress, providerConfig, capturedTranscript, ompRoleModels } = await import('../server/live/autopilot-sandbox.ts')
+const { sandboxArgs, publicAddress, providerConfig, capturedTranscript, ompRoleModels, trustedGatewayAddresses, gatewayAddressAllowed } = await import('../server/live/autopilot-sandbox.ts')
 const { ompCredentials } = await import('../server/live/omp-credentials.ts')
 const { Settings } = await import('../server/live/settings.ts')
 const { herdr } = await import('../server/live/herdr.ts')
@@ -339,6 +339,55 @@ describe('trusted broker, limits and actual namespace configuration', () => {
     multiple.query('INSERT INTO auth_credentials VALUES (?, ?, ?, ?)').run('other', 'api_key', '{"key":"second"}', null)
     multiple.close()
     expect(() => ompCredentials(home, reviewerModels)).toThrow('multiple credentials')
+  })
+  test('OMP pi-native imports only the selected gateway and explicit models without OAuth', () => {
+    const home = mkdtempSync(join(tmpdir(), 'pilot-omp-gateway-')), dir = join(home, '.omp/agent')
+    mkdirSync(dir, { recursive: true })
+    const provider = { transport: 'pi-native', baseUrl: 'https://lazarus.tail123.ts.net:8776', apiKey: 'gateway-secret.123', api: 'openai-codex-responses', headers: { secret: 'unrelated-header' }, models: [{ id: 'gpt-6.1-terra', name: 'Terra', contextWindow: 200000, cost: { input: 0, secret: 'unrelated-cost' }, secret: 'unrelated-model' }, { id: 'other', name: 'Other' }] }
+    const config = { providers: { 'openai-codex': provider, unrelated: { apiKey: 'unrelated-secret' } } }
+    writeFileSync(join(dir, 'models.yml'), JSON.stringify(config))
+    const result = ompCredentials(home, ['openai-codex/gpt-6.1-terra'])
+    expect(result.hasCredentials).toBe(false)
+    expect(result.gateways).toEqual([{ host: 'lazarus.tail123.ts.net', port: 8776 }])
+    const output = JSON.parse(result.modelsConfig)
+    expect(output.providers['openai-codex'].models).toEqual([{ id: 'gpt-6.1-terra', name: 'Terra', contextWindow: 200000, cost: { input: 0 } }])
+    expect(result.modelsConfig).not.toContain('unrelated')
+    expect(result.credentials).not.toContain('gateway-secret')
+    const db = new Database(join(dir, 'agent.db'))
+    db.run('CREATE TABLE auth_credentials (provider TEXT, credential_type TEXT, data TEXT, disabled_cause TEXT)')
+    db.query('INSERT INTO auth_credentials VALUES (?, ?, ?, ?)').run('openai-codex', 'oauth', '{"refresh":"never-copy"}', null)
+    db.query('INSERT INTO auth_credentials VALUES (?, ?, ?, ?)').run('other', 'api_key', '{"key":"other-key"}', null)
+    db.close()
+    const mixed = ompCredentials(home, ['openai-codex/gpt-6.1-terra', 'other/review'])
+    expect(mixed.hasCredentials).toBe(true)
+    expect(mixed.credentials).toContain('other-key')
+    expect(mixed.credentials).not.toContain('never-copy')
+    expect(() => ompCredentials(home, ['openai-codex/missing'])).toThrow('explicit gateway model')
+    for (const bad of [
+      { baseUrl: 'http://lazarus.tail123.ts.net:8776' }, { baseUrl: 'https://127.0.0.1:8776' },
+      { baseUrl: 'https://evil.example:8776' }, { baseUrl: 'https://lazarus.tail123.ts.net:8776/path' },
+      { apiKey: 'GATEWAY_TOKEN' }, { apiKey: '!get-secret' }, { apiKey: '$(secret)' },
+      { transport: 'other' }, { api: 'other' },
+    ]) {
+      writeFileSync(join(dir, 'models.yml'), JSON.stringify({ providers: { 'openai-codex': { ...provider, ...bad } } }))
+      expect(() => ompCredentials(home, ['openai-codex/gpt-6.1-terra'])).toThrow()
+    }
+  })
+  test('gateway exception pins exact Tailscale self or peer, DNS answers and port', () => {
+    const gateway = { host: 'lazarus.tail123.ts.net', port: 8776 }
+    const self = { DNSName: 'lazarus.tail123.ts.net.', TailscaleIPs: ['100.103.129.84'] }
+    for (const status of [{ Self: self }, { Peer: { node: self } }]) {
+      const trusted = trustedGatewayAddresses([gateway], status)
+      expect(gatewayAddressAllowed(gateway.host, '8776', ['100.103.129.84'], trusted)).toBe(true)
+      expect(gatewayAddressAllowed(gateway.host, '443', ['100.103.129.84'], trusted)).toBe(false)
+      expect(gatewayAddressAllowed('other.tail123.ts.net', '8776', ['100.103.129.84'], trusted)).toBe(false)
+      expect(gatewayAddressAllowed(gateway.host, '8776', ['100.103.129.85'], trusted)).toBe(false)
+      expect(gatewayAddressAllowed(gateway.host, '8776', ['100.103.129.84', '127.0.0.1'], trusted)).toBe(false)
+      expect(gatewayAddressAllowed(gateway.host, '8776', [], trusted)).toBe(false)
+    }
+    expect(() => trustedGatewayAddresses([gateway], { Self: { ...self, TailscaleIPs: ['127.0.0.1'] } })).toThrow()
+    expect(() => trustedGatewayAddresses([gateway], { Self: self, Peer: { duplicate: self } })).toThrow()
+    expect(() => trustedGatewayAddresses([gateway], { Self: { ...self, DNSName: 'other.tail123.ts.net.' } })).toThrow()
   })
   test('OMP isolates its config, discovers only the main transcript and accounts for subagents and side requests', () => {
     const a = new Agents(), run = 'omp-usage-fixture', captures = join(HOME, 'autopilot-runtime', run, 'coordinator/captures')

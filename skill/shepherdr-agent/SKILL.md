@@ -47,9 +47,13 @@ build, check and review the work is your own judgment.
    foreground, its stdin closed (or it waits on stdin forever) and under a timeout, with your shell's timeout at its
    most: `timeout 540 codex exec -s read-only -o <out> "<prompt>" < /dev/null`. For Oh My Pi, use
    `timeout 540 "$(dirname "$SHEPHERDR_COMMAND")/shepherdr-omp-review" -- "<prompt>" < /dev/null > <out>`.
-   Before `--`, pass `--model provider/model` and `--thinking <level>` when selected. The helper requires exactly one
-   stored API key for that provider; it refuses OAuth and ambiguous credentials rather than copying refresh tokens.
-   Its private OMP home and config disable project MCP and extensions, while retaining the session for usage accounting.
+   Before `--`, pass `--model provider/model` and `--thinking <level>` when selected. The helper accepts an explicit
+   HTTPS pi-native gateway and selected model in the user's OMP `models.yml`, or exactly one stored API key for the
+   provider. Gateway bearers may be literal or use `!cat ~/path` to a private, user-owned file; the helper reads that
+   file directly without executing a command. It refuses OAuth, ambiguous credentials, other secret commands and
+   unsupported gateway configuration rather than copying refresh tokens or executing a secret command. Its private OMP home contains only
+   the selected credential or gateway, disables global and project MCP and extensions, and retains the session for usage
+   accounting.
    Include the diff in the prompt: the read-only tools cannot run Git or send chat commands. Read the output file
    yourself and carry its findings into the task's normal facts and chat. Never auto-approve tools or enable write or
    shell tools for the reviewer. Never in the background, and never end

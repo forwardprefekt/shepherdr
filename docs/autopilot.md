@@ -45,33 +45,51 @@ workers can write only their own worktree and private runtime home. Host Git met
 containing hardlinks to shared files is refused rather than exposing those shared inodes for writing.
 
 Exact public HTTPS host names are allowed through a trusted CONNECT gateway. Wildcards, arbitrary ports, direct
-network access and private/loopback/Tailscale destinations are blocked. Provider clients must honor the HTTP(S)
-proxy. This limits CONNECT destinations and their resolved public IPs; encrypted application traffic is not inspected,
-so another service hosted on the same IP may be reachable. Custom providers may need their public host added; a local provider is unsupported. Failure never enables
-host networking. Provider configuration is copied selectively: host MCP executors, hooks and installed plugins
-are not imported. The selected agent and reviewer login files are copied into the private home; the host login files are not overwritten.
+network access and private/loopback/Tailscale destinations are blocked, except for the explicitly selected OMP
+pi-native gateway described below. Provider clients must honor the HTTP(S) proxy. This limits CONNECT destinations
+and their resolved IPs; encrypted application traffic is not inspected, so another service hosted on the same IP
+may be reachable. Custom providers may need their public host added. Failure never enables host networking.
+Provider configuration is copied selectively: host MCP executors, hooks and installed plugins are not imported.
+The selected agent and reviewer login files are copied into the private home; host login files are not overwritten.
 A login that cannot work in the isolated runtime needs the human; it never falls back to another account.
-OMP requires a stored API key for the selected fully qualified `provider/model`, or a fully qualified
-`modelRoles.default` in `~/.omp/agent/config.yml`. Only matching enabled API-key records are read from
-`~/.omp/agent/agent.db` and imported into the private OMP home; other accounts, settings, MCP credentials,
-hooks and plugins are not copied. OAuth credentials are refused because refreshing a copied token could rotate it
-and invalidate the host login. Store an API key in OMP instead. Environment-only credentials, custom model
-definitions, external authentication brokers and local providers are not imported. OMP is started with extension
-discovery disabled and a private configuration overlay disables project MCP configuration. Provider authentication
-and hosts must work through the same HTTPS gateway. Each selected provider must have exactly one enabled stored
-credential: no credential or multiple enabled credentials stops the launch rather than choosing an account.
 
-To smoke-test OMP Autopilot on a supported Linux repository, install OMP and bubblewrap, store an API key for the selected
-provider in OMP, select a fully qualified OMP model, and allow its public HTTPS host in the Autopilot profile. Turn ON,
-send a message and confirm the reply appears in the chat; delegate an owned task and confirm its transcript and
-reported-token count appear, then turn OFF and confirm the coordinator and owned worker stop. Repeat with an
-unapproved host and verify the request fails without falling back to host networking.
+OMP requires a fully qualified `provider/model`, or a fully qualified `modelRoles.default` in
+`~/.omp/agent/config.yml`. Ordinarily each selected provider must have exactly one enabled stored API key in
+`~/.omp/agent/agent.db`. Only those records are imported; OAuth is refused because refreshing a copied token could
+rotate it and invalidate the host login. Environment-only credentials, external authentication brokers and
+other custom provider configurations are not imported.
+
+Alternatively, a selected provider can use its existing `~/.omp/agent/models.yml` pi-native configuration: an
+HTTPS Tailscale `*.ts.net` origin, a literal gateway bearer, `openai-codex-responses`, and an explicit definition
+for each selected model. Only selected providers and model metadata are copied to the private home; other providers,
+headers, hooks and commands are not. Gateway bearers are powerful credentials and are accessible to processes in
+that isolated home. Use a suitably scoped bearer and do not use the isolated runtime for untrusted code.
+No OAuth credentials are copied or refreshed for gateway providers.
+
+The host must have the Tailscale CLI and a running, authenticated Tailscale daemon. At launch, the configured
+hostname must identify exactly one node (including the local node) in `tailscale status --json`. CONNECT is allowed
+only to that exact hostname and configured port, and every DNS result must match that node's Tailscale addresses.
+Other tailnet hosts and ports remain blocked. TLS remains end-to-end and certificate verification is not disabled;
+traffic still counts against the shared allowance. Node identity is pinned for the lifetime of the sandbox, so
+address changes require a fresh launch. OMP starts with extensions disabled and a private configuration overlay
+disables project MCP configuration.
+
+To smoke-test on a supported Linux repository, select OMP with a fully qualified model such as
+`openai-codex/gpt-6.1-terra` whose existing pi-native config points to the Tailscale Serve HTTPS gateway
+`https://lazarus.taila61dff.ts.net:8776`. Ensure normal OMP works, Tailscale is connected, bubblewrap is available,
+and the HTTPS certificate is trusted. Turn Autopilot ON, send a message and confirm a reply; delegate an owned task
+and confirm its transcript and reported-token count appear. Turn OFF and confirm the coordinator and worker stop.
+Also try another tailnet hostname or port from inside an isolated session and confirm it is blocked. For ordinary
+API-key providers, allow the provider's public HTTPS hostname in the profile instead.
 
 The gateway fixes command chat/cwd identity itself. A caller cannot choose another task, secret scope or permission
 profile. Secret values use the existing masked CLI flow, only for names explicitly in this profile. Settings,
 deleting tasks, unrelated work and host-file artifacts require the human. Merges require human approval by default;
 choosing `none` permits managed-task merges while each task brief's merge policy still applies. Workers save a
 commit using `shepherdr checkpoint "message"`; this broker operation stages their worktree and commits with hooks, filters, custom Git credential helpers
+and filesystem monitors disabled. Broker Git uses normal SSH configuration or the authenticated GitHub account;
+workspace-controlled scripts are not run on the host. Custom clean/smudge filters and custom SSH command wrappers
+are unavailable through this broker. Directh hooks, filters, custom Git credential helpers
 and filesystem monitors disabled. Broker Git uses normal SSH configuration or the authenticated GitHub account;
 workspace-controlled scripts are not run on the host. Custom clean/smudge filters and custom SSH command wrappers
 are unavailable through this broker. Direct Git metadata writes are refused.

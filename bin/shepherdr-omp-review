@@ -6,6 +6,7 @@ use JSON::PP qw(decode_json encode_json);
 use File::Temp qw(tempdir);
 use File::Path qw(make_path remove_tree);
 use IPC::Open3;
+use Fcntl qw(O_RDONLY O_NOFOLLOW O_DIRECTORY O_NONBLOCK S_ISREG);
 
 my ($model, $thinking);
 while (@ARGV && $ARGV[0] ne '--') {
@@ -31,6 +32,144 @@ sub capture {
   close $out or die "OMP command failed\n";
   return $text;
 }
+# Parse a deliberately limited YAML subset (or JSON), without executing OMP
+# secret commands. The one supported !cat form is read directly and safely.
+sub yaml_scalar {
+  my ($value) = @_;
+  $value =~ s/\s+$//;
+  return decode_json($value) if $value =~ /^"/;
+  if ($value =~ /^'(.*)'$/s) { my $s = $1; $s =~ s/''/'/g; return $s }
+  if ($value =~ /^\[(.*)\]$/s) {
+    my $items = $1;
+    return [] if $items =~ /^\s*$/;
+    return [map { s/^\s+|\s+$//g; yaml_scalar($_) } split /,/, $items, -1];
+  }
+  return $value if $value =~ m{\A!cat ~/[A-Za-z0-9._/-]+\z};
+  die "Unsupported models.yml scalar\n" if $value eq '' || $value =~ /[\[\]{}'"#]|(?:^|\s)[!&*]|[\r\n]/;
+  return JSON::PP::true if $value eq 'true';
+  return JSON::PP::false if $value eq 'false';
+  return 0 + $value if $value =~ /\A(?:0|[1-9]\d*)(?:\.\d+)?\z/;
+  return $value;
+}
+sub yaml_block {
+  my ($lines, $index, $indent) = @_;
+  my $array = $lines->[$$index][1] =~ /^- /;
+  my $result = $array ? [] : {};
+  while ($$index < @$lines && $lines->[$$index][0] == $indent) {
+    my $text = $lines->[$$index][1];
+    if ($array) {
+      die "Unsupported models.yml sequence\n" unless $text =~ s/^- //;
+      if ($text =~ /^([\w.-]+):(?:\s+(.*))?$/) {
+        # A sequence mapping's first key shares the dash line; parse it
+        # together with any following keys at the normal mapping indent.
+        $lines->[$$index] = [$indent + 2, $text];
+        my $item = yaml_block($lines, $index, $indent + 2);
+        push @$result, $item;
+      } else {
+        push @$result, yaml_scalar($text);
+        $$index++;
+      }
+    } else {
+      die "Unsupported models.yml mapping\n" unless $text =~ /^([\w.-]+):(?:\s+(.*))?$/;
+      my ($key, $value) = ($1, $2);
+      die "Duplicate models.yml key\n" if exists $result->{$key};
+      $$index++;
+      if (defined $value && length $value) {
+        $result->{$key} = yaml_scalar($value);
+      } else {
+        die "Missing models.yml value\n" unless $$index < @$lines && $lines->[$$index][0] > $indent;
+        $result->{$key} = yaml_block($lines, $index, $lines->[$$index][0]);
+      }
+    }
+  }
+  die "Invalid models.yml indentation\n" if $$index < @$lines && $lines->[$$index][0] > $indent;
+  return $result;
+}
+sub gateway_bearer_file {
+  my ($reference) = @_;
+  die "OMP reviewer gateway supports only a single !cat ~/path reference\n"
+    unless $reference =~ m{\A!cat ~/([A-Za-z0-9._/-]+)\z};
+  my @parts = split m{/}, $1, -1;
+  die "OMP reviewer gateway bearer path must stay under HOME\n"
+    if grep { $_ eq '' || $_ eq '.' || $_ eq '..' } @parts;
+  # Pin each directory before opening the next component. Unlike lstat followed
+  # by a path-based open, this cannot be redirected by replacing an ancestor.
+  my @handles;
+  my $error = "OMP reviewer gateway bearer must be a private user-owned regular file without symlinks\n";
+  sysopen(my $parent, $home, O_RDONLY | O_DIRECTORY | O_NOFOLLOW) or die $error;
+  push @handles, $parent;
+  for my $index (0 .. $#parts) {
+    my $flags = O_RDONLY | O_NOFOLLOW | O_NONBLOCK;
+    $flags |= O_DIRECTORY if $index < $#parts;
+    sysopen(my $next, "/proc/self/fd/" . fileno($parent) . "/$parts[$index]", $flags) or die $error;
+    push @handles, $next;
+    $parent = $next;
+  }
+  my @opened = stat($parent);
+  die $error unless @opened && S_ISREG($opened[2]) && $opened[4] == $>
+    && !($opened[2] & 0077) && $opened[7] <= 65536;
+  local $/;
+  my $key = <$parent>;
+  $key =~ s/\r?\n\z// if defined $key;
+  return $key;
+}
+sub gateway_config {
+  my ($path, $provider, $model_id) = @_;
+  return undef unless -e $path;
+  open my $fh, '<', $path or die "Cannot read OMP models.yml\n";
+  local $/;
+  my $text = <$fh>;
+  close $fh;
+  my $parsed;
+  eval {
+    if ($text =~ /^\s*\{/) {
+      $parsed = decode_json($text);
+    } else {
+      my @lines;
+      for my $line (split /\n/, $text) {
+        $line =~ s/\r$//;
+        next if $line =~ /^\s*(?:#.*)?$/;
+        die "Tabs are unsupported in models.yml\n" if $line =~ /^\s*\t/;
+        $line =~ /^( *)(\S.*)$/ or die "Invalid models.yml line\n";
+        push @lines, [length($1), $2];
+      }
+      die "Empty models.yml\n" unless @lines && $lines[0][0] == 0;
+      my $index = 0;
+      $parsed = yaml_block(\@lines, \$index, 0);
+      die "Invalid models.yml indentation\n" unless $index == @lines;
+    }
+    1;
+  } or do {
+    my $error = $@;
+    my ($reason) = $error =~ /\A(Unsupported models\.yml (?:scalar|sequence|mapping)|Duplicate models\.yml key|Missing models\.yml value|Invalid models\.yml (?:indentation|line)|Tabs are unsupported in models\.yml|Empty models\.yml)\n/;
+    die "OMP reviewer cannot safely parse models.yml: " . ($reason // 'invalid or unsupported syntax') . "\n";
+  };
+  die "OMP reviewer models.yml must contain a providers mapping\n"
+    unless ref($parsed) eq 'HASH' && ref($parsed->{providers}) eq 'HASH';
+  my $entry = $parsed->{providers}{$provider};
+  return undef unless defined $entry;
+  die "OMP reviewer provider configuration must be a mapping\n" unless ref($entry) eq 'HASH';
+  return undef unless ($entry->{transport} // '') eq 'pi-native';
+  die "OMP reviewer gateway requires a safe HTTPS baseUrl\n"
+    unless !ref($entry->{baseUrl}) && ($entry->{baseUrl} // '') =~ m{\Ahttps://[A-Za-z0-9](?:[A-Za-z0-9.-]*[A-Za-z0-9])?(?::[0-9]{1,5})?(?:/[A-Za-z0-9._~/-]*)?\z};
+  my $key = $entry->{apiKey};
+  $key = gateway_bearer_file($key) if defined($key) && !ref($key) && $key =~ /^!/;
+  die "OMP reviewer gateway requires a literal bearer or safe !cat ~/path reference, not an environment variable or command\n"
+    unless defined($key) && !ref($key) && $key =~ /\A[A-Za-z0-9._~+\/=-]+\z/ && $key !~ /\A[A-Z_][A-Z0-9_]*\z/;
+  die "OMP reviewer gateway requires openai-codex-responses API\n"
+    unless !ref($entry->{api}) && ($entry->{api} // '') eq 'openai-codex-responses';
+  die "OMP reviewer gateway requires an explicit models list\n" unless ref($entry->{models}) eq 'ARRAY';
+  my @models = grep { ref($_) eq 'HASH' && !ref($_->{id}) && ($_->{id} // '') eq $model_id } @{$entry->{models}};
+  die "OMP reviewer gateway requires exactly one explicit selected model\n" unless @models == 1;
+  my %model;
+  for my $field (qw(id name reasoning input contextWindow maxTokens cost)) {
+    $model{$field} = $models[0]{$field} if exists $models[0]{$field};
+  }
+  return { providers => { $provider => {
+    transport => 'pi-native', baseUrl => $entry->{baseUrl}, apiKey => $key,
+    api => $entry->{api}, models => [\%model],
+  } } };
+}
 if (!$model && $isolated) {
   open my $selected, '<', '/run/shepherdr/omp-reviewer-model' or die "Missing isolated reviewer model\n";
   $model = <$selected>;
@@ -41,16 +180,18 @@ if (!$model) {
   my $roles = decode_json(capture($omp, 'config', 'get', 'modelRoles', '--json'));
   $model = $roles->{value}{default};
 }
-die "OMP reviewer needs a fully qualified provider/model\n" unless defined $model && $model =~ m{\A([\w.-]+)/[^/\s]+\z};
-my $provider = $1;
-my $export = decode_json(capture($omp, 'auth', 'export'));
-die "Unexpected OMP credential export\n" unless ref($export->{credentials}) eq 'ARRAY';
-my @credentials = grep { ref($_) eq 'HASH' && ($_->{provider} // '') eq $provider } @{$export->{credentials}};
-die "OMP reviewer requires exactly one credential for $provider\n" unless @credentials == 1;
-die "OMP reviewer requires an API key; OAuth credentials cannot be safely copied\n" unless ref($credentials[0]{credential}) eq 'HASH' && ($credentials[0]{credential}{type} // '') eq 'api_key';
-my $auth = encode_json({ version => 1, credentials => \@credentials });
-undef $export;
-@credentials = ();
+die "OMP reviewer needs a fully qualified provider/model\n" unless defined $model && $model =~ m{\A([\w.-]+)/([^/\s]+)\z};
+my ($provider, $model_id) = ($1, $2);
+my $gateway = gateway_config("$agent_dir/models.yml", $provider, $model_id);
+my $auth;
+if (!$gateway) {
+  my $export = decode_json(capture($omp, 'auth', 'export'));
+  die "Unexpected OMP credential export\n" unless ref($export->{credentials}) eq 'ARRAY';
+  my @credentials = grep { ref($_) eq 'HASH' && ($_->{provider} // '') eq $provider } @{$export->{credentials}};
+  die "OMP reviewer requires exactly one credential for $provider\n" unless @credentials == 1;
+  die "OMP reviewer requires an API key; OAuth credentials cannot be safely copied\n" unless ref($credentials[0]{credential}) eq 'HASH' && ($credentials[0]{credential}{type} // '') eq 'api_key';
+  $auth = encode_json({ version => 1, credentials => \@credentials });
+}
 
 my $tmp = tempdir('shepherdr-omp-review-XXXXXX', TMPDIR => 1, CLEANUP => 0);
 END { remove_tree($tmp) if defined $tmp && -d $tmp }
@@ -59,7 +200,14 @@ my $cleanup = sub { remove_tree($tmp) if -d $tmp };
 $SIG{TERM} = sub { $cleanup->(); exit 143 };
 $SIG{INT} = sub { $cleanup->(); exit 130 };
 my $dir = "$tmp/.omp/agent";
+umask 0077;
 make_path($dir, { mode => 0700 });
+if ($gateway) {
+  open my $models, '>', "$dir/models.yml" or die "Cannot write private OMP models.yml\n";
+  print $models encode_json($gateway) or die "Cannot write private OMP models.yml\n";
+  close $models or die "Cannot write private OMP models.yml\n";
+  undef $gateway;
+}
 my $config = "$tmp/reviewer.yml";
 open my $cfg, '>', $config or die "Cannot write reviewer config: $!\n";
 print $cfg "autoResume: false\nmcp:\n  enableProjectConfig: false\n";
@@ -71,13 +219,15 @@ $env{HOME} = $tmp;
 $env{XDG_CONFIG_HOME} = "$tmp/.config";
 $env{PI_CODING_AGENT_DIR} = $dir;
 local %ENV = %env;
-my $pid = open3(my $in, my $out, '>&STDERR', $omp, 'auth', 'import', '-');
-print $in $auth or die "Cannot pass OMP credential\n";
-close $in;
-undef $auth;
-{ local $/; <$out> }
-waitpid($pid, 0);
-if ($? != 0) { $cleanup->(); die "OMP could not import the selected API key\n" }
+if (defined $auth) {
+  my $pid = open3(my $in, my $out, '>&STDERR', $omp, 'auth', 'import', '-');
+  print $in $auth or die "Cannot pass OMP credential\n";
+  close $in;
+  undef $auth;
+  { local $/; <$out> }
+  waitpid($pid, 0);
+  if ($? != 0) { $cleanup->(); die "OMP could not import the selected API key\n" }
+}
 my @cmd = ($omp, '-p', '--config', $config, '--no-extensions', '--tools', 'read,grep,glob', '--session-dir', $sessions, '--model', $model);
 push @cmd, '--thinking', $thinking if defined $thinking && length $thinking;
 push @cmd, $prompt;
