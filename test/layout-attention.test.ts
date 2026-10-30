@@ -47,6 +47,8 @@ describe.skipIf(!browser)('attention count circles', () => {
             expect(geometry.radius).toBe('50%')
             expect(geometry.fits).toBe(true)
             expect(geometry.colour).toBe(theme === 'dark' ? 'rgb(0, 0, 0)' : 'rgb(255, 255, 255)')
+            // The previous row click leaves the mouse hovering it, which replaces the badge with its menu button.
+            await page.mouse.move(0, 0)
             const row = page.locator(`nav[aria-label="Places"] li[data-project="${place}"]`)
             if (!await row.isVisible()) await page.getByRole('button', { name: 'Places', exact: true }).click()
             await row.locator(badge).waitFor()

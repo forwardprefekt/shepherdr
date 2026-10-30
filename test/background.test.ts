@@ -139,14 +139,18 @@ describe('an agent whose turn ended', () => {
   const rec = (key: string, name: string, cwd: string, sessionId: string) => ({ key, name, kind: 'claude', cwd, workspace: 'w', logs: [], sessionId, started: 0 })
   writeJson('agents.json', { 'T-1/Agent': rec('T-1/Agent', 'shep-t-1', '/w/1', 's1'), 'T-2/Agent': rec('T-2/Agent', 'shep-t-2', '/w/2', 's2') })
 
-  // Refresh schedules the slower screen reads separately from the transport health check.
-  const refresh = async (a: InstanceType<typeof Agents>) => {
-    await a.refresh()
-    while (a['readingBackground']) {
+  // A subscription opening can start another refresh while the slower screen reads are in flight.
+  const settle = async (a: InstanceType<typeof Agents>) => {
+    while (a['refreshing'] || a['readingBackground']) {
       const { promise, resolve } = Promise.withResolvers<void>()
       setImmediate(resolve)
       await promise
     }
+  }
+  const refresh = async (a: InstanceType<typeof Agents>) => {
+    await settle(a)
+    await a.refresh()
+    await settle(a)
   }
 
   test('its session file says what still runs, else its screen; a change is told as a status change', async () => {

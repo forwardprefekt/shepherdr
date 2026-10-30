@@ -75,7 +75,7 @@ describe.skipIf(!browser)('restarting an agent', () => {
   }, 30_000)
 
   test('saving defaults is optional, scoped to the role, and sent only when selected', async () => {
-    const p = world.snapshot().places.find((x) => !x.home)!
+    const p = world.snapshot().places.find((x) => x.id === world.tasks.find((t) => t.id === 'GTM-17')!.place)!
     for (const task of [false, true]) {
       const chat = task ? 'GTM-17/Agent' : p.chat
       world.chats[chat].agent = { kind: 'codex' }
