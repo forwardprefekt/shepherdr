@@ -5,6 +5,7 @@ import { existsSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { sh, repo, world, until, started, placeId, settingsBlock, writeJson, fakeHerdr } from './engine-world.ts'
 import { ompStatus } from '../server/live/agents.ts'
+import { PiReader } from '../server/live/readers/pi.ts'
 const { fitStatus, reportOf, STALL_QUIET } = await import('../server/live/engine/engine.ts')
 
 describe('recovered private routing failures', () => {
@@ -184,6 +185,11 @@ describe('a task is its brief and one agent', () => {
     await until(() => w.started.some((s) => s.key === key) && w.engine['briefing'].has(t.id))
     w.brief(key)
     expect(w.engine.statusOf(t)).toBe('todo')
+    const reader = new PiReader('omp')
+    const events = (id: string, message: object) => reader.parse([{ text: JSON.stringify({ type: 'message', id, timestamp: '2026-10-30T01:00:00Z', message }), offset: 0 }], '/session.jsonl')
+    events('user', { role: 'user', content: 'Work' })
+    expect(events('tool', { role: 'assistant', content: [], stopReason: 'toolUse' }).some((e) => e.kind === 'turn-end')).toBe(false)
+    events('result', { role: 'toolResult', content: [] })
     w.agentIs(key, ompStatus('idle', 'π ⠧ 📋 OMP: Task'))
     expect(w.engine.view(t).status).toBe('work')
     w.chat.menu = { title: 'Choose a color', question: true }
@@ -192,12 +198,22 @@ describe('a task is its brief and one agent', () => {
     w.chat.menu = undefined
     w.agentIs(key, ompStatus('idle', 'π ⠧ 📋 OMP: Task'))
     expect(w.engine.statusOf(t)).toBe('work')
+    expect(events('error', { role: 'assistant', content: [], stopReason: 'error', errorMessage: 'Provider overloaded' }).map((e) => e.kind)).toContain('turn-end')
+    w.engine.retry = () => ({ cut: 'error', tries: 1, reason: 'Provider overloaded', words: 'Overloaded', due: Date.now() + 60_000 })
+    w.agentIs(key, ompStatus('idle', 'π > 📋 OMP: Task'))
+    expect(w.engine.statusOf(t)).toBe('work')
+    w.engine.retry = undefined
     w.agentIs(key, ompStatus('idle', 'π > 📋 OMP: Task'))
     expect(w.engine.statusOf(t)).toBe('need')
     w.bg[key] = 'agents'
     expect(w.engine.statusOf(t)).toBe('work')
     w.chat.card = 'ask'
     expect(w.engine.statusOf(t)).toBe('need')
+    w.chat.card = undefined
+    w.bg[key] = undefined
+    w.agentIs(key, ompStatus('idle', 'π ⠧ 📋 OMP: Task'))
+    await w.engine.pause(t.id)
+    expect(w.engine.statusOf(t)).toBe('todo')
   })
 
   test("the status follows the agent, and the list and the task's chat always show the same", async () => {
