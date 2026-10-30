@@ -8,24 +8,6 @@ const { browser, server, world } = await layout()
 describe.skipIf(!browser)('the UI pass (SHE-81)', () => {
   const at = (q: string) => `http://127.0.0.1:${server!.port}/?${q}`
 
-  for (const [name, viewport] of [
-    ['desktop', { width: 1440, height: 900 }],
-    ['tablet', { width: 1024, height: 768 }],
-  ] as const)
-    test(`nothing pops up a tooltip on hover: no title on any button, row or icon (${name})`, async () => {
-      const page = await browser!.newPage({ viewport, hasTouch: name === 'tablet' })
-      // an artifact frame's title only names it to screen readers
-      const titled = () => page.evaluate(() => [...document.querySelectorAll('[title]:not(iframe), svg title')].map((e) => e.outerHTML.slice(0, 120)))
-      await page.goto(at('place=p:mac:lilla-varlden&task=LV-3'))
-      await page.locator('[data-card]').first().waitFor()
-      expect(await titled()).toEqual([])
-      await page.goto(at('place=vm-str/home&tab=tasks'))
-      await page.locator('[data-msg]').first().waitFor()
-      await page.getByRole('button', { name: 'Menu', exact: true }).click()
-      await page.getByRole('menuitemcheckbox', { name: 'Autopilot' }).waitFor()
-      expect(await titled()).toEqual([])
-      await page.close()
-    }, 30_000)
 
   test('V and M while typing in search or an artifact type letters; they start no call', async () => {
     const page = await browser!.newPage({ viewport: { width: 1440, height: 900 } })

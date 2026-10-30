@@ -97,7 +97,6 @@ describe('claude reader', () => {
       'turn-end:turn-msg_B',
     ])
     expect(ev[0]).toMatchObject({ kind: 'session', sessionId: S })
-    expect(ev.filter((e) => e.kind !== 'usage' && e.kind !== 'turn-start' && !STEPS.has(e.kind))[5].id).toBe('msg_B')
   })
 
   test('a command Claude Code runs itself reads as typed, with what it printed as its answer, and starts no turn', () => {

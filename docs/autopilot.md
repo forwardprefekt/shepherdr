@@ -43,6 +43,9 @@ including shell commands, native helpers and headless reviewers, regardless of t
 home files, Herdr/Shepherdr control sockets and local/private network are absent. The coordinator sees its project read-only;
 workers can write only their own worktree and private runtime home. Host Git metadata is read-only. A worktree
 containing hardlinks to shared files is refused rather than exposing those shared inodes for writing.
+The selected OMP executable is available as `omp` inside its sandbox; its presence does not imply that OMP
+has reached interactive readiness or that its configured model gateway is reachable. The private OMP home
+starts with onboarding marked complete after provider selection; host settings are not copied.
 If the project uses Git, its root must have an ordinary `.git` directory, not a Git worktree. A task worktree's Git metadata
 must resolve to that project's own `.git/worktrees` directory; unrelated metadata paths are refused.
 

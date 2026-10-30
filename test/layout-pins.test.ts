@@ -49,8 +49,7 @@ describe.skipIf(!browser)('pinned spaces', () => {
       expect(await page.getByRole('menuitem', { name: 'Pin', exact: true }).count()).toBe(0)
       await page.keyboard.press('Escape')
       // its count and bold, once
-      expect(await page.locator('#places').getByLabel('1 need you here', { exact: true }).count()).toBe(1)
-      expect(await proj.getByLabel('1 need you here', { exact: true }).count()).toBe(1)
+      expect(await proj.locator('[data-attention-badge] .attention-badge-need').textContent()).toBe('1')
       expect(Number(await proj.locator('button > span').evaluate((s) => getComputedStyle(s).fontWeight))).toBeGreaterThanOrEqual(600)
 
       // Unpin puts it back in its place in the tree

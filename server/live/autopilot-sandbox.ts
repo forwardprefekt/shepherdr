@@ -61,7 +61,7 @@ export function sandboxArgs(o: { cwd: string; repo: string; home: string; state:
   // Native Claude/Codex binaries, or pi's package (its script needs its relative modules).
   if (o.kind === 'pi') { const modules = o.binary.includes('/node_modules/') ? o.binary.slice(0, o.binary.indexOf('/node_modules/') + 14) : dirname(dirname(o.binary)); a.push('--ro-bind', modules, modules) }
   a.push('--ro-bind', o.binary, `/run/shepherdr/${o.kind}`)
-  for (const [k, v] of Object.entries({ HOME: o.home, USER: 'agent', TERM: 'xterm-256color', PATH: '/run/shepherdr/bin:/usr/local/bin:/usr/bin:/bin', SHEPHERDR_CHAT: '', NODE_USE_ENV_PROXY: '1', SHEPHERDR_COMMAND: '/run/shepherdr/bin/shepherdr', CODEX_HOME: join(o.home, '.codex'), PI_CODING_AGENT_DIR: join(o.home, '.pi/agent'), CLAUDE_CONFIG_DIR: join(o.home, '.claude') })) a.push('--setenv', k, v)
+  for (const [k, v] of Object.entries({ HOME: o.home, USER: 'agent', TERM: 'xterm-256color', PATH: '/run/shepherdr/bin:/run/shepherdr:/usr/local/bin:/usr/bin:/bin', SHEPHERDR_CHAT: '', NODE_USE_ENV_PROXY: '1', SHEPHERDR_COMMAND: '/run/shepherdr/bin/shepherdr', CODEX_HOME: join(o.home, '.codex'), PI_CODING_AGENT_DIR: join(o.home, '.pi/agent'), CLAUDE_CONFIG_DIR: join(o.home, '.claude') })) a.push('--setenv', k, v)
   a.push('--chdir', o.cwd, '/run/shepherdr/bun', '/run/shepherdr/bootstrap.ts', o.kind === 'pi' ? o.binary : `/run/shepherdr/${o.kind}`)
   return a
 }
@@ -184,6 +184,10 @@ export async function prepareSandbox(spec: Spec, run: PilotRun, repo: string, cl
     const dir = join(state, '.omp/agent')
     privateDestination(state, dir)
     mkdirSync(dir, { recursive: true, mode: 0o700 })
+    // The private home has no interactive onboarding; provider selection is already established above.
+    const settings = join(dir, 'config.yml')
+    privateDestination(state, settings)
+    if (!existsSync(settings)) writeFileSync(settings, 'setupVersion: 2\n', { mode: 0o600 })
     privateDestination(state, join(dir, 'autopilot-credentials.json'))
     if (omp.hasCredentials) writeFileSync(join(dir, 'autopilot-credentials.json'), omp.credentials, { mode: 0o600 })
     else rmSync(join(dir, 'autopilot-credentials.json'), { force: true })

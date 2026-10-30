@@ -488,7 +488,7 @@ export class Engine extends Emitter<Events> {
     // held until the machine has room
     if (this.holding(t)) return 'queued'
     if (t.todo || this.starting.has(t.id) || this.briefing.has(t.id)) return 'todo'
-    // on its way into main, nothing for you to do: unless its agent stopped to ask you something (then it is Ready)
+    // on its way into main, nothing for you to do unless its agent stopped to ask you something
     if (t.reported && t.landing && (st === 'working' || !this.asks(key))) return 'merging'
     if (st === 'working' || this.handing.has(t.id)) return 'work'
     if (this.agents.waiting(key).length || Date.now() - (this.wrote.get(t.id) ?? 0) < ANSWER_GRACE) return 'work'

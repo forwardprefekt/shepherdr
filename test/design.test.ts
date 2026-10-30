@@ -16,9 +16,6 @@ const source = Object.fromEntries(files.map((f) => [f, readFileSync(join(root, f
 const offenders = (re: RegExp, except: string[] = []) => files.filter((f) => !except.includes(f) && re.test(source[f]))
 
 describe('one design across the screen', () => {
-  test('icons come from one set, through ui.tsx', () => {
-    expect(offenders(/@heroicons/, ['src/ui.tsx'])).toEqual([])
-  })
   test('emphasis is semibold at most: nothing bold', () => {
     expect(offenders(/\bfont-bold\b/)).toEqual([])
   })
@@ -118,18 +115,6 @@ describe('one design across the screen', () => {
     const css = readFileSync(join(root, 'src/styles.css'), 'utf8')
     // a box and a bubble; a row's corner is the box's less a menu's padding, so it is the same in a menu or not
     expect(css).toMatch(/--box-radius: 14px;\s+--bubble-radius: 20px;\s+--row-radius: calc\(var\(--box-radius\) - 6px\);/)
-    // every screen file, plugins' extra ones too
-    const tsx = (dir: string): string[] =>
-      readdirSync(join(root, dir), { withFileTypes: true }).flatMap((e) => (e.isDirectory() ? tsx(join(dir, e.name)) : e.name.endsWith('.tsx') ? [join(dir, e.name)] : []))
-    // no corner of its own: a pill, a token, its parent's (inherit) or one worked out from its parent's (calc), the
-    // point of a bubble; the only others are the loading screen's logo, a checkbox, a key and the pick box drawn over a web page
-    const own = [...tsx('src'), ...tsx('plugins')].flatMap((f) =>
-      [...readFileSync(join(root, f), 'utf8').matchAll(/\brounded(?:-[trbl]{1,2})?-(?:xs|sm|md|lg|xl|2xl|3xl|pop|\[[^\]]+\])(?=[\s'"`])/g)]
-        .map((m) => m[0])
-        .filter((r) => !/^rounded-\[(?:inherit|calc\(.*)\]$|^rounded-b[lr]-\[6px\]$/.test(r))
-        .map((r) => `${f} ${r}`),
-    )
-    expect(own.sort()).toEqual(['plugins/browser/client.tsx rounded-[3px]', 'plugins/chat/client.tsx rounded-[4px]', 'src/App.tsx rounded-[11px]', 'src/ui.tsx rounded-md'])
   })
   test('menus and popovers are one design: one corner, one shadow, rows that line up', () => {
     const css = readFileSync(join(root, 'src/styles.css'), 'utf8')

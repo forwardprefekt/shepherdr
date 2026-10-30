@@ -122,7 +122,7 @@ describe('voice routes', () => {
   })
   test('peer watch pins survive screen changes, remain machine scoped and are released', () => {
     const f = fixture()
-    const machines = Object.assign(new Emitter(), { links: new Map([['remote', f.peer]]), voiceWatches: new Map(), screenWatch: { chats: [], term: null }, owner: () => f.peer }) as unknown as InstanceType<typeof Machines>
+    const machines = Object.assign(new Emitter(), { links: new Map([['remote', f.peer]]), voiceWatches: new Map(), screenWatch: { chats: [], term: null }, owner: () => f.peer, watch: Machines.prototype.watch }) as unknown as InstanceType<typeof Machines>
     const seen: string[] = []
     const off = Machines.prototype.subscribeChat.call(machines, f.peer as never, 'ABC-1/Agent', (c) => seen.push(c.key))
     machines.watch([], null)

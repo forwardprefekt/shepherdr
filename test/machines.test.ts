@@ -190,10 +190,10 @@ describe('a machine run from the main one', () => {
       // no browser on the main machine: its error names its own paths
       src.checker = async () => ({ errors: [], warnings: [], skipped: 'could not open a browser here (no chrome at ' + ${JSON.stringify(join(home, 'chrome'))} + ')' })
       outs.push((await src.cli(['artifact', 'check', 'board.html'], { cwd })).out)
-      console.log(JSON.stringify(outs))
+      console.log('RESULT:' + JSON.stringify(outs))
       process.exit(0)`
     const r = spawnSync(process.execPath, ['-e', code], { encoding: 'utf8', env: { ...process.env, ...mirrorHomes(home, box), PATH: `${bin}:${process.env.PATH}`, SHEPHERDR_BOX: JSON.stringify(box), SHEPHERDR_HOME: home, SHEPHERDR_MACHINE: 'vm-demo', HERDR_SOCKET_PATH: join(home, 'no-herdr.sock') } })
-    const outs = JSON.parse(r.stdout) as string[]
+    const outs = JSON.parse(r.stdout.split('RESULT:').at(-1)!.split('\n')[0]) as string[]
     for (const out of outs) expect(out).not.toContain(home)
     const checks = join(there, '.shepherdr', 'helper', 'checks')
     for (const out of outs.slice(0, 3)) expect(out).toContain(`Pictures at phone width: ${checks}/a.png (dark: ${checks}/a-dark.png)`)
@@ -235,12 +235,12 @@ describe('a machine run from the main one', () => {
       // the main machine's Shepherdr is away (it restarts)
       ;(await import('node:fs')).rmSync(${JSON.stringify(join(main, 'server.json'))})
       outs.push(await run(['set', 'brief.review', 'off']))
-      console.log(JSON.stringify(outs))
+      console.log('RESULT:' + JSON.stringify(outs))
       process.exit(0)`
     try {
       const w = Bun.spawn([process.execPath, '-e', code], { stdout: 'pipe', stderr: 'pipe', env: { ...process.env, ...mirrorHomes(home, box), PATH: `${bin}:${process.env.PATH}`, SHEPHERDR_BOX: JSON.stringify(box), SHEPHERDR_HOME: home, SHEPHERDR_MACHINE: 'vm-demo', SHEPHERDR_MAIN_HOME: main, SHEPHERDR_SHARED_HOME: main, HERDR_SOCKET_PATH: join(home, 'no-herdr.sock') } })
       const out = await new Response(w.stdout).text()
-      const [set, mine, unset, away] = JSON.parse(out) as [number, string, { value: string; from: string }][]
+      const [set, mine, unset, away] = JSON.parse(out.split('RESULT:').at(-1)!.split('\n')[0]) as [number, string, { value: string; from: string }][]
       expect(set).toEqual([0, "brief.review = off (Everywhere's)", { value: 'off', from: 'all' }])
       expect(mine).toEqual([0, "machine.maxTasks = 3 (vm-demo's)", { value: '3', from: 'machine' }])
       expect(unset[0]).toBe(0)

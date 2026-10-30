@@ -91,7 +91,7 @@ describe.skipIf(!bwrap)('Autopilot actual OS boundary', () => {
     await expect(prepareSandbox({ key: 'OWN-1/Agent', name: 'fixture', kind: 'claude', cwd, workspace: 'fixture' }, run, cwd, async () => ({ out: '', code: 0 }), 'codex', { providerHome, executable: (kind) => executables[kind] })).rejects.toThrow('symlink')
     expect(existsSync(join(providerHome, 'auth.json'))).toBe(false)
   })
-  for (const kind of ['claude', 'codex']) test(`${kind} and its child shell cannot access host files, control files, Git metadata or host network`, async () => {
+  for (const kind of ['claude', 'codex', 'omp']) test(`${kind} and its child shell cannot access host files, control files, Git metadata or host network`, async () => {
     const root = mkdtempSync(join(tmpdir(), 'shep-pilot-os-'))
     const repo = join(root, 'repo'), cwd = join(root, 'task'), state = join(root, 'state'), control = join(root, 'control')
     for (const p of [repo, cwd, state, control, join(cwd, '.git')]) mkdirSync(p, { recursive: true })
@@ -103,6 +103,7 @@ describe.skipIf(!bwrap)('Autopilot actual OS boundary', () => {
     const fake = join(root, kind)
     writeFileSync(fake, `#!/bin/sh
 set -eu
+test "$(command -v ${kind})" = "/run/shepherdr/${kind}"
 printf '%s\\n' "$@" > '${cwd}/launch-args'
 test ! -e '${secret}'
 if echo bad > '${repo}/escape' 2>/dev/null; then exit 11; fi

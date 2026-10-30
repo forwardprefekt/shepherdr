@@ -127,7 +127,7 @@ describe('an agent whose turn ended', () => {
       buf = buf.slice(i + 1)
       const agent = (name: string, pane_id: string) => ({ agent: 'claude', agent_status: 'done', name, pane_id, tab_id: 't', workspace_id: 'w', cwd: null, interactive_ready: true })
       const result =
-        method === 'agent.list' ? { agents: [agent('shep-t-1', 'p1'), agent('shep-t-2', 'p2')] } : method === 'pane.read' ? { read: { text: screens[params.pane_id] ?? '' } } : {}
+        method === 'agent.list' ? { agents: [agent('shep-t-1', 'p1'), agent('shep-t-2', 'p2')] } : method === 'pane.read' ? { read: { text: screens[params.pane_id] ?? '' } } : method === 'pane.process_info' ? { process_info: {} } : {}
       c.end(`${JSON.stringify({ id, result })}\n`)
     })
   }).listen(process.env.HERDR_SOCKET_PATH)
@@ -139,12 +139,26 @@ describe('an agent whose turn ended', () => {
   const rec = (key: string, name: string, cwd: string, sessionId: string) => ({ key, name, kind: 'claude', cwd, workspace: 'w', logs: [], sessionId, started: 0 })
   writeJson('agents.json', { 'T-1/Agent': rec('T-1/Agent', 'shep-t-1', '/w/1', 's1'), 'T-2/Agent': rec('T-2/Agent', 'shep-t-2', '/w/2', 's2') })
 
+  // A subscription opening can start another refresh while the slower screen reads are in flight.
+  const settle = async (a: InstanceType<typeof Agents>) => {
+    while (a['refreshing'] || a['readingBackground']) {
+      const { promise, resolve } = Promise.withResolvers<void>()
+      setImmediate(resolve)
+      await promise
+    }
+  }
+  const refresh = async (a: InstanceType<typeof Agents>) => {
+    await settle(a)
+    await a.refresh()
+    await settle(a)
+  }
+
   test('its session file says what still runs, else its screen; a change is told as a status change', async () => {
     session('busy')
     const a = new Agents()
     const told: string[] = []
     a.on('status', (key) => told.push(key))
-    await a.refresh()
+    await refresh(a)
     expect(a.background('T-1/Agent')).toBe('agents')
     expect(a.background('T-2/Agent')).toBe('agents')
     // the reviewer finished, woke it, and it stopped again in between herdr's looks: told, though herdr saw nothing
@@ -152,7 +166,7 @@ describe('an agent whose turn ended', () => {
     session('idle')
     a.sessions = new ClaudeSessions()
     screens.p2 = WOKE_AND_DONE
-    await a.refresh()
+    await refresh(a)
     expect(a.background('T-1/Agent')).toBeUndefined()
     expect(a.background('T-2/Agent')).toBeUndefined()
     expect(told.sort()).toEqual(['T-1/Agent', 'T-2/Agent'])
@@ -163,7 +177,7 @@ describe('an agent whose turn ended', () => {
     session('shell')
     const a = new Agents()
     a.reviewers = { runs: (chat: string) => chat === 'T-1/Agent' } as never
-    await a.refresh()
+    await refresh(a)
     expect(a.background('T-1/Agent')).toBe('agents')
     expect(a.background('T-1/Agent', Date.now() + a.shellsFor + 1)).toBe('agents')
     // the review is over: its shells alone again, for so long
@@ -175,13 +189,13 @@ describe('an agent whose turn ended', () => {
   test("shells alone keep it at work only so long: a server it started for you never wakes it", async () => {
     session('shell')
     const a = new Agents()
-    await a.refresh()
+    await refresh(a)
     expect(a.background('T-1/Agent')).toBe('shells')
     expect(a.background('T-1/Agent', Date.now() + a.shellsFor + 1)).toBeUndefined()
     const told: string[] = []
     a.on('status', (key) => told.push(key))
     a.shellsFor = 0
-    await a.refresh()
+    await refresh(a)
     expect(a.background('T-1/Agent')).toBeUndefined()
     expect(told).toEqual(['T-1/Agent'])
     a.stop()
@@ -196,12 +210,12 @@ describe('an agent whose turn ended', () => {
     session('shell')
     const a = new Agents()
     a.records['T-1/Agent'].hooks = events
-    await a.refresh()
+    await refresh(a)
     expect(a.background('T-1/Agent')).toBe('agents')
     // long past what shells alone may keep it at work
     expect(a.background('T-1/Agent', Date.now() + a.shellsFor + 1)).toBe('agents')
     a.shellsFor = 0
-    await a.refresh()
+    await refresh(a)
     expect(a.background('T-1/Agent')).toBe('agents')
     // hooks that say only shells, while the session file says a subagent runs: it runs
     const shells = join(mkdtempSync(join(tmpdir(), 'shep-bg-hooks-')), 'e.jsonl')
@@ -236,7 +250,7 @@ describe('an agent whose turn ended', () => {
     session('shell')
     const a = new Agents()
     a.records['T-1/Agent'].hooks = stop(REV4)
-    await a.refresh()
+    await refresh(a)
     expect(a.background('T-1/Agent')).toBe('shells')
     // where 10 minutes used to make it "needs you"
     expect(a.background('T-1/Agent', Date.now() + a.serversFor + 1)).toBe('shells')
@@ -246,7 +260,7 @@ describe('an agent whose turn ended', () => {
     // they ended and woke it, and it stopped again with nothing in the background, not ready: it needs you
     session('idle')
     a.sessions = new ClaudeSessions()
-    await a.refresh()
+    await refresh(a)
     expect(a.background('T-1/Agent')).toBeUndefined()
     a.stop()
 
@@ -271,15 +285,15 @@ describe('an agent whose turn ended', () => {
     const a = new Agents()
     a.records['T-1/Agent'].hooks = events
     a.shellsFor = 60_000
-    await a.refresh()
+    await refresh(a)
     expect(a.background('T-1/Agent')).toBe('shells')
     // seen two minutes ago: past what it may wait
     ;(a as any).seen.get('T-1/Agent').since -= 120_000
-    await a.refresh()
+    await refresh(a)
     expect(a.background('T-1/Agent')).toBeUndefined()
     // you asked how it goes; it answered in between herdr's looks and stopped again: counted from now
     turn(Date.now() - 2000)
-    await a.refresh()
+    await refresh(a)
     expect(a.background('T-1/Agent')).toBe('shells')
     expect(a.background('T-1/Agent', Date.now() + 60_001)).toBeUndefined()
     a.stop()

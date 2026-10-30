@@ -204,9 +204,9 @@ describe.skipIf(!browser)('repository base', () => {
       expect(world.tasks.find((t) => t.id === 'GTM-15')!.base).toBe('main')
       await settings.getByRole('button', { name: 'Close', exact: true }).click()
       await page.getByRole('button', { name: /Ready GTM-15 Fix webhook/ }).click()
-      await page.getByText('Merges into main', { exact: true }).waitFor()
+      await page.getByText('Merges into main', { exact: true }).first().waitFor()
       await page.setViewportSize({ width: 390, height: 844 })
-      await page.getByText('Merges into main', { exact: true }).waitFor()
+      await page.getByText('Merges into main', { exact: true }).and(page.locator(':visible')).first().waitFor()
     } finally {
       world.bases['p:vm-str:gtm'] = before
       world.emit('snapshot')

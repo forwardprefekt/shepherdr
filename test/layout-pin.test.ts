@@ -23,8 +23,8 @@ describe.skipIf(!browser)('the lists’ chips', () => {
     const page = await browser!.newPage({ viewport: { width: 1600, height: 900 } })
     await page.goto(at('place=vm-str/home'))
     const list = page.getByRole('region', { name: 'Tasks' })
-    // the main home space lists its own tasks, as any space: none in the demo
-    await list.getByText('No tasks yet. Ask home to add one.').waitFor()
+    // Pick the home space explicitly; the main home overview may start with every space.
+    await add(page, 'home · vm-str')
     expect(await chips(page)).toEqual(['p:vm-str:~'])
     await page.getByRole('button', { name: /^gtm\b/ }).click()
     const gtm16 = list.getByRole('button', { name: /GTM-16 Docs/ })
@@ -121,10 +121,11 @@ describe.skipIf(!browser)('the lists’ chips', () => {
     expect(await chips(page)).toEqual(['p:vm-str:gtm', 'p:mac:lilla-varlden'])
 
     // unpinned, they follow the space picked again, and a task opens over the list as before
+    await page.getByRole('button', { name: /^gtm\b/ }).click()
     await list.getByRole('button', { name: 'Locked: unlock filters to follow the space picked' }).click()
     await list.getByRole('button', { name: 'Lock filters: keep them when switching spaces' }).waitFor()
     await lv3.waitFor({ state: 'detached' })
-    await page.getByRole('button', { name: /^gtm\b/ }).click()
+    await page.getByRole('textbox', { name: 'Message gtm…' }).waitFor()
     expect(await chips(page)).toEqual(['p:vm-str:gtm'])
     await list.getByRole('button', { name: /GTM-16 Docs/ }).click()
     await page.getByRole('textbox', { name: 'Message GTM-16…' }).waitFor()
@@ -178,9 +179,12 @@ describe.skipIf(!browser)('the lists’ chips', () => {
     await page.getByRole('button', { name: /LV-3 Upload page/ }).waitFor()
     expect(await chips(page)).toEqual(['p:vm-str:gtm', 'm:mac', 'p:vm-str:herdr-projects', 'm:nas'])
     // unpinned, the tab shows the space picked
+    await page.getByRole('button', { name: 'Places' }).click()
+    await page.locator('li[data-project="p:vm-str:gtm"]').getByRole('button', { name: /^gtm\b/ }).click()
+    await page.getByRole('group', { name: 'View' }).getByRole('button', { name: /^Tasks/ }).click()
     await page.getByRole('button', { name: 'Locked: unlock filters to follow the space picked' }).click()
     await page.getByRole('button', { name: /LV-3 Upload page/ }).waitFor({ state: 'detached' })
-    expect(await chips(page)).toEqual(['p:vm-str:~'])
+    expect(await chips(page)).toEqual(['p:vm-str:gtm'])
     await page.close()
   }, 30_000)
 })
