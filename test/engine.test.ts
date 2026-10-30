@@ -4,9 +4,10 @@ import { describe, expect, test } from 'bun:test'
 import { existsSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { sh, repo, world, until, started, placeId, settingsBlock, writeJson, fakeHerdr } from './engine-world.ts'
-import { ompStatus } from '../server/live/agents.ts'
 import { PiReader } from '../server/live/readers/pi.ts'
 const { fitStatus, reportOf, STALL_QUIET } = await import('../server/live/engine/engine.ts')
+// Load after engine-world sets the isolated Shepherdr home.
+const { ompStatus } = await import('../server/live/agents.ts')
 
 describe('recovered private routing failures', () => {
   const failure = 'Could not provision private agent command routing'
