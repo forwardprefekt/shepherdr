@@ -1,13 +1,15 @@
 // The tasks engine on a real git repo, with the agents stubbed (engine-world.ts): a task starts its agent at once on
 // its brief, and its status follows that agent alone (the list and the task's own chat always agree).
 import { describe, expect, test } from 'bun:test'
-import { existsSync, writeFileSync } from 'node:fs'
+import { appendFileSync, existsSync, mkdtempSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
+import { tmpdir } from 'node:os'
 import { sh, repo, world, until, started, placeId, settingsBlock, writeJson, fakeHerdr } from './engine-world.ts'
 import { PiReader } from '../server/live/readers/pi.ts'
 const { fitStatus, reportOf, STALL_QUIET } = await import('../server/live/engine/engine.ts')
 // Load after engine-world sets the isolated Shepherdr home.
-const { ompStatus } = await import('../server/live/agents.ts')
+const { Agents, ompStatus } = await import('../server/live/agents.ts')
+const { Chats, parseMenu } = await import('../server/live/chats.ts')
 
 describe('recovered private routing failures', () => {
   const failure = 'Could not provision private agent command routing'
@@ -193,9 +195,14 @@ describe('a task is its brief and one agent', () => {
     events('result', { role: 'toolResult', content: [] })
     w.agentIs(key, ompStatus('idle', 'π ⠧ 📋 OMP: Task'))
     expect(w.engine.view(t).status).toBe('work')
-    w.chat.menu = { title: 'Choose a color', question: true }
+    w.records[key].kind = 'omp'
+    const info = w.agents.info
+    w.agents.info = (k) => ({ ...info(k), pane_id: info(k)?.pane_id ?? 'p', terminal_title_stripped: 'π ! 🎨 COLOR: Choose Red or Blue' })
     w.agentIs(key, ompStatus('idle', 'π ! 🎨 COLOR: Choose Red or Blue'))
-    expect(w.engine.view(t)).toMatchObject({ status: 'need', sub: 'Choose a color' })
+    expect(w.engine.view(t)).toMatchObject({ status: 'need', sub: 'Question for you' })
+    expect(w.cards.at(-1)?.sub).toBe('Question for you')
+    w.chat.menu = { title: 'Choose a color', question: true }
+    expect(w.engine.view(t).sub).toBe('Choose a color')
     w.chat.menu = undefined
     w.agentIs(key, ompStatus('idle', 'π ⠧ 📋 OMP: Task'))
     expect(w.engine.statusOf(t)).toBe('work')
@@ -215,6 +222,46 @@ describe('a task is its brief and one agent', () => {
     w.agentIs(key, ompStatus('idle', 'π ⠧ 📋 OMP: Task'))
     await w.engine.pause(t.id)
     expect(w.engine.statusOf(t)).toBe('todo')
+  })
+
+  test('OMP task state uses its live pane and the main transcript together', async () => {
+    const w = world()
+    const { t, key } = await started(w, repo(), 'omp-live')
+    const dir = mkdtempSync(join(tmpdir(), 'shep-omp-status-'))
+    const log = join(dir, 'session.jsonl')
+    const append = (id: string, message: object) => appendFileSync(log, `${JSON.stringify({ type: 'message', id, timestamp: new Date().toISOString(), message })}\n`)
+    writeFileSync(log, '')
+    const agents = new Agents()
+    agents.records[key] = { key, name: 'omp-task', kind: 'omp', cwd: dir, workspace: 'w', logs: [log], started: Date.now() }
+    agents.live.set('omp-task', { agent: 'omp', agent_status: 'idle', terminal_title_stripped: 'π ⠧ task', cwd: dir, name: 'omp-task', pane_id: 'p', tab_id: 't', workspace_id: 'w' })
+    const chats = new Chats(agents, (k) => k, () => 'You')
+    agents.endedSince = (k, at) => chats.endedSince(k, at)
+    w.engine['agents'] = agents
+    w.engine['chats'] = chats
+    append('user', { role: 'user', content: 'Work' })
+    append('tool', { role: 'assistant', content: [], stopReason: 'toolUse' })
+    append('result', { role: 'toolResult', content: [] })
+    chats.pull(key)
+    expect(w.engine.view(t).status).toBe('work')
+    const pane = agents.live.get('omp-task')!
+    pane.terminal_title_stripped = 'π ! task'
+    w.engine.agentStatus(key)
+    expect(w.engine.view(t)).toMatchObject({ status: 'need', sub: 'Question for you' })
+    expect(w.cards.at(-1)?.sub).toBe('Question for you')
+    const screen = '╭─ Ask ──────╮\n│ Choose?    │\n├────────────┤\n│ ❯ ○ Yes    │\n│   ○ No     │\n├────────────┤\n│ ⏎ select · ↑/↓ move │'
+    chats['menus'].set(key, parseMenu(screen)!)
+    expect(w.engine.view(t).sub).toBe('Choose?')
+    chats['menus'].delete(key)
+    pane.terminal_title_stripped = 'π ⠧ task'
+    append('continuing', { role: 'assistant', content: [], stopReason: 'toolUse' })
+    chats.pull(key)
+    expect(w.engine.statusOf(t)).toBe('work')
+    append('end', { role: 'assistant', content: [{ type: 'text', text: 'Finished.' }], stopReason: 'stop' })
+    pane.terminal_title_stripped = 'π > task'
+    chats.pull(key)
+    expect(w.engine.statusOf(t)).toBe('need')
+    agents.live.delete('omp-task')
+    expect(w.engine.statusOf(t)).toBe('need')
   })
 
   test("the status follows the agent, and the list and the task's chat always show the same", async () => {
