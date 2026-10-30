@@ -2150,6 +2150,7 @@ describe('startup menus before the first message', () => {
 describe('visible launch controls', () => {
   test('coordinator and task metadata comes from the launch record, never new Settings; old actions cannot claim an unapplied change', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'shep-controls-'))
+    execSync('git init -q -b main', { cwd: dir })
     const p = await src.places.add(dir, 'launch-controls')
     const place = placeId.space(p.name)
     const t = src.engine.add({ project: p.name, title: 'Launch controls', by: 'test', later: true })

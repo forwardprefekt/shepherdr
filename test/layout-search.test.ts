@@ -11,6 +11,7 @@ describe.skipIf(!browser)('unified search', () => {
     const page = await browser!.newPage({ viewport: { width, height: 900 } })
     try {
       await page.goto(url())
+      await page.locator('[data-composer]:visible').first().waitFor()
       await page.keyboard.press('Control+k')
       const search = page.getByRole('combobox', { name: 'Search or jump to' })
       await search.waitFor()
@@ -20,7 +21,7 @@ describe.skipIf(!browser)('unified search', () => {
       await group.getByRole('option').first().waitFor()
       expect(await group.getByRole('option').count()).toBe(8)
       await group.getByRole('button', { name: /Show more messages/ }).click()
-      expect(await group.getByRole('option').count()).toBe(28)
+      expect(await until(() => group.getByRole('option').count(), n => n === 28)).toBe(28)
       const hit = group.getByRole('option', { name: /^Search paging needle 29 / })
       await hit.click()
       expect(page.url()).toContain('task=LV-3')
@@ -50,6 +51,7 @@ describe.skipIf(!browser)('unified search', () => {
     const page = await browser!.newPage({ viewport: { width: 1440, height: 900 } })
     try {
       await page.goto(url())
+      await page.getByRole('button', { name: /^Search or jump to/ }).waitFor()
       await page.keyboard.press('Control+k')
       await page.getByRole('combobox', { name: 'Search or jump to' }).fill('late-stream-needle')
       await page.getByRole('listbox', { name: 'Search results' }).waitFor()
@@ -68,6 +70,7 @@ describe.skipIf(!browser)('unified search', () => {
     const page = await browser!.newPage({ viewport: { width: 1440, height: 900 } })
     try {
       await page.goto(url())
+      await page.getByRole('button', { name: /^Search or jump to/ }).waitFor()
       await page.keyboard.press('Control+k')
       const search = page.getByRole('combobox', { name: 'Search or jump to' })
       await search.fill('home nas')

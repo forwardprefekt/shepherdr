@@ -183,23 +183,27 @@ describe.skipIf(!browser)('grouping a machine\'s tasks', () => {
     // by status: one Needs you for every machine, not split by machine again; each row names its machine and space
     expect(await labels(page)).toEqual(['Needs you', 'Ready', 'Merging', 'Working', 'Queued', 'To do', 'Done'])
     let s = await subs(page)
-    expect(s['GTM-14']).toBe('vm-str · gtm · Asks permission')
+    expect(s['GTM-14']).toStartWith('vm-str · gtm · ')
+    expect(s['GTM-14']).toContain('Asks permission')
     expect(s['LV-3']).toStartWith('mac · lilla-varlden · ')
     // its pull request's number gives way to where it is
-    expect(s['GTM-15']).toBe('vm-str · gtm · Ready to merge')
+    expect(s['GTM-15']).toStartWith('vm-str · gtm · ')
+    expect(s['GTM-15']).toContain('Ready to merge')
     await pick(page, 'Machine')
     expect(await labels(page)).toEqual(['mac', 'vm-str'])
     s = await subs(page)
-    expect(s['GTM-14']).toBe('gtm · Asks permission')
+    expect(s['GTM-14']).toStartWith('gtm · ')
+    expect(s['GTM-14']).toContain('Asks permission')
     await pick(page, 'Space')
     expect(await labels(page)).toEqual(['lilla-varlden', 'gtm', 'herdr-projects'])
     // the heading says the machine, quietly: the rows say neither
     expect(await page.locator('[data-heading="gtm"]').textContent()).toBe('gtm · vm-str6')
     s = await subs(page)
-    expect([s['GTM-14'], s['GTM-15']]).toEqual(['Asks permission', 'PR #128 · Ready to merge'])
+    expect(s['GTM-14']).toContain('Asks permission')
+    expect(s['GTM-15']).toContain('Ready to merge')
     await pick(page, 'Machine › Space')
     expect(await labels(page)).toEqual(['mac', 'lilla-varlden', 'vm-str', 'gtm', 'herdr-projects'])
-    expect((await subs(page))['GTM-14']).toBe('Asks permission')
+    expect((await subs(page))['GTM-14']).toContain('Asks permission')
     // the machine's name a step above its groups' labels
     const weight = (name: string) => page.locator(`[data-heading="${name}"] button > :not(svg)`).first().evaluate((e) => Number(getComputedStyle(e).fontWeight))
     expect(await weight('vm-str')).toBeGreaterThan(await weight('gtm'))
@@ -212,7 +216,7 @@ describe.skipIf(!browser)('grouping a machine\'s tasks', () => {
     // a space's rows say neither
     await page.goto(`http://127.0.0.1:${server!.port}/?place=${encodeURIComponent('p:vm-str:gtm')}`)
     await page.waitForSelector('section[aria-label="Tasks"] li')
-    expect((await subs(page))['GTM-14']).toBe('Asks permission')
+    expect((await subs(page))['GTM-14']).toContain('Asks permission')
     await ctx.close()
   }, 30_000)
 

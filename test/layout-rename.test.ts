@@ -73,7 +73,6 @@ describe.skipIf(!browser)('renaming spaces and machines', () => {
       // new names
       await places.locator('li[data-project="p:vm-str:~"]').getByRole('button', { name: /^home/ }).click()
       const tasks = page.locator('section[aria-label="Tasks"]')
-      await tasks.getByRole('button', { name: 'Remove home · Work VM' }).click()
       await tasks.locator('li', { hasText: 'Work VM · go-to-market' }).first().waitFor()
 
       // a home space is renamed as any space, by the same rules

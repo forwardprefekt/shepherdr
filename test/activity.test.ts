@@ -264,6 +264,8 @@ function world(kind: 'claude' | 'codex', status: () => string, runs: () => strin
     typedSince: () => [],
     failedLately: () => [],
     holdOf: () => undefined,
+    runtime: () => undefined,
+    runtimeHook: () => undefined,
     info: () => undefined,
   }
   const chats = new Chats(agents as never, (k) => k, () => 'You')

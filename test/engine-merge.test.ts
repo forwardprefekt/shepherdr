@@ -559,9 +559,9 @@ describe('on GitHub: a pull request per task', () => {
     // a question in its words alone is no fact: still Merging
     w.chat.reply = 'Merge it anyway?'
     expect(w.engine.statusOf(t)).toBe('merging')
-    // it asks you on a card meanwhile: Ready, as it waits for you
+    // an open question needs your attention, even while the merge is pending
     w.chat.card = 'ask'
-    expect(w.engine.statusOf(t)).toBe('ready')
+    expect(w.engine.statusOf(t)).toBe('need')
     w.chat.card = undefined
     w.chat.reply = 'Merging once the checks pass.'
     // the checks pass while it rests with nothing running to wake it: it is told once to merge
