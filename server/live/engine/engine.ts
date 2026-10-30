@@ -559,7 +559,11 @@ export class Engine extends Emitter<Events> {
       if (said?.helper) return NEED.permission
       const q = this.chats.openQuestion(key)
       if (q) return fitStatus(q.items[0]?.question ?? '') || NEED.question
-      return loginGone(this.chats.menu(key)?.title) ? NEED.login : NEED.permission
+      const menu = this.chats.menu(key)
+      if (menu?.question) return fitStatus(menu.title) || NEED.question
+      if (loginGone(menu?.title)) return NEED.login
+      if (this.agents.record(key)?.kind === 'omp' && /^π\s+!\s/.test(this.agents.info(key)?.terminal_title_stripped ?? '')) return NEED.question
+      return NEED.permission
     }
     const card = this.chats.openCard(key)
     if (card) return card === 'plan' ? NEED.plan : fitStatus(this.chats.openCardTitle(key) ?? '') || NEED.question

@@ -39,6 +39,14 @@ describe('recorded startup prompts', () => {
     expect(m.choices).toEqual(['Trust and continue', 'Back to Agent Command Center'])
     expect(menuKeys(m, 0)).toEqual(['enter'])
   })
+  test('OMP ask dialog shows its full question and uses the terminal for answers', () => {
+    const text = '╭─ Ask ──────────╮\n│ Choose a color │\n├────────────────┤\n│ ❯ ○ Red        │\n│   ○ Blue       │\n│   ○ Other (type your own) │\n├────────────────┤\n│ ⏎ select · n note · ↑/↓ move · ⎋ cancel │'
+    const m = parseMenu(text)!
+    expect(m.title).toBe('Choose a color')
+    expect(m.choices).toEqual([])
+    expect(m.screen).toContain('Other (type your own)')
+    expect(menuId('c', m)).toBe(menuId('c', parseMenu(text.replace('│ ❯ ○ Red', '│   ○ Red').replace('│   ○ Blue', '│ ❯ ○ Blue'))!))
+  })
   test('generic arrow and y/n menus; ordinary input is not a menu', () => {
     expect(parseMenu('Choose provider\n❯ Local\n  Hosted\nEnter to select · ↑/↓ to navigate')?.choices).toEqual(['Local', 'Hosted'])
     expect(parseMenu('Choose\n❯ Allow once\n  Allow always\n  Cancel\nEnter to confirm')?.choices).toEqual(['Allow once', 'Allow always', 'Cancel'])

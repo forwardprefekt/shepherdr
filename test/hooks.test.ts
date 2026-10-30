@@ -9,7 +9,7 @@ import { join } from 'node:path'
 
 process.env.SHEPHERDR_HOME ??= mkdtempSync(join(tmpdir(), 'shep-hooks-'))
 const { foldHook, hookSettings, HookLogs, HOOK_EVENTS, pickHook, record } = await import('../server/live/readers/hooks.ts')
-const { Agents, statusFrom } = await import('../server/live/agents.ts')
+const { Agents, statusFrom, ompStatus } = await import('../server/live/agents.ts')
 const { Chats } = await import('../server/live/chats.ts')
 type Said = import('../server/live/readers/hooks.ts').Said
 
@@ -202,6 +202,16 @@ describe('the one mapping: what it reports over what herdr reads off its screen'
     expect(statusFrom(said('idle'), 'blocked')).toBe('blocked')
     expect(statusFrom(said('working'), 'gone')).toBe('gone')
   })
+  test('OMP live title follows the turn without concealing menus or a stopped pane', () => {
+    expect(ompStatus('idle', 'π ⠧ 📋 OMP: Fix OMP task status')).toBe('working')
+    expect(ompStatus('idle', 'π ! 🎨 COLOR: Choose Red or Blue')).toBe('blocked')
+    expect(ompStatus('working', 'π ! 🎨 COLOR: Choose Red or Blue')).toBe('blocked')
+    expect(ompStatus('idle', 'π > 📋 OMP: Fix OMP task status')).toBe('idle')
+    expect(ompStatus('blocked', 'π ⠧ 📋 OMP: Fix OMP task status')).toBe('blocked')
+    expect(ompStatus('gone', 'π ⠧ 📋 OMP: Fix OMP task status')).toBe('gone')
+    expect(ompStatus('done', 'π ⠧ 📋 OMP: Fix OMP task status')).toBe('done')
+    expect(ompStatus('idle', undefined)).toBe('idle')
+  })
 })
 
 describe('recording', () => {
@@ -270,6 +280,29 @@ function oneAgent(events: string, log: string, herdrSays = 'idle') {
   a.endedSince = (k, at) => chats.endedSince(k, at)
   return { a, key, chats }
 }
+
+test('an OMP pane follows its live title as it starts and stops, including an intervening menu', () => {
+  const { a, key } = oneAgent('', '')
+  a.records[key].kind = 'omp'
+  const pane = a.live.get('t-9')!
+  pane.agent = 'omp'
+  pane.terminal_title_stripped = 'π > 📋 OMP: Task'
+  expect(a.status(key)).toBe('idle')
+  pane.terminal_title_stripped = 'π ⠧ 📋 OMP: Task'
+  expect(a.status(key)).toBe('working')
+  pane.terminal_title_stripped = 'π ! 🎨 COLOR: Choose Red or Blue'
+  expect(a.status(key)).toBe('blocked')
+  pane.agent_status = 'blocked'
+  expect(a.status(key)).toBe('blocked')
+  pane.agent_status = 'idle'
+  pane.terminal_title_stripped = 'π > 📋 OMP: Task'
+  expect(a.status(key)).toBe('idle')
+  pane.agent = null
+  pane.terminal_title_stripped = 'π ⠧ 📋 OMP: Task'
+  expect(a.status(key)).toBe('idle')
+  a.live.delete('t-9')
+  expect(a.status(key)).toBe('gone')
+})
 
 describe('a turn cut short runs no hook: its transcript says it is over', () => {
   test('a permission prompt turned down', async () => {
