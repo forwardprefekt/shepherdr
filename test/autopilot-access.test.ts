@@ -42,6 +42,21 @@ describe.skipIf(!bwrap)('Autopilot actual OS boundary', () => {
       expect(await Bun.file(join(cwd, 'child-progress')).text()).toBe(progress)
     } finally { await box.close() }
   })
+  test('the launcher passes interactive input into the isolated agent', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'pilot-stdin-'))
+    const cwd = join(root, 'project'), providerHome = join(root, 'login'), executable = join(root, 'claude')
+    mkdirSync(cwd); mkdirSync(providerHome)
+    writeFileSync(executable, '#!/bin/sh\nIFS= read -r line || exit 1\nprintf "received:%s\\n" "$line"\n', { mode: 0o700 })
+    const p = new PilotRuns(); p.runs = []
+    const run = p.begin('input', { harness: { kind: 'claude' }, hosts: [], secrets: [], approvals: [], parallel: 1 }); run.state = 'on'
+    const box = await prepareSandbox({ key: 'OWN-3/Agent', name: 'input', kind: 'claude', cwd, workspace: 'fixture' }, run, cwd, async () => ({ out: '', code: 0 }), undefined, { providerHome, executable: () => executable })
+    try {
+      const child = Bun.spawn([box.wrapper], { stdin: 'pipe', stdout: 'pipe', stderr: 'pipe' })
+      child.stdin.write('hello from operator\n'); child.stdin.end()
+      const [code, out, err] = await Promise.all([child.exited, new Response(child.stdout).text(), new Response(child.stderr).text()])
+      expect({ code, out, err }).toEqual({ code: 0, out: 'received:hello from operator\n', err: '' })
+    } finally { await box.close(); rmSync(root, { recursive: true, force: true }) }
+  })
   test('cross-harness reviewer executable/login and fixed broker identity share the same boundary', async () => {
     const root = mkdtempSync(join(tmpdir(), 'pilot-reviewer-os-'))
     const providerHome = join(root, 'fake-login'), cwd = join(root, 'project')

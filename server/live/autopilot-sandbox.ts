@@ -311,8 +311,8 @@ export async function prepareSandbox(spec: Spec, run: PilotRun, repo: string, cl
   const command = deadline === undefined ? [bwrap, ...args] : ['/usr/bin/timeout', '--foreground', '--signal=KILL', `${Math.max(0.001, deadline / 1000)}s`, bwrap, ...args]
   // Keep the named adapter in the terminal's foreground process group: Herdr identifies
   // sh /…/claude (or codex/pi). The CLI itself stays in the new session for TIOCSTI safety.
-  // Explicit stdin inheritance matters: a background shell command otherwise gets /dev/null.
-  writeFileSync(wrapper, `#!/bin/sh\n${command.map(q).join(' ')} "$@" <&0 &\nchild=$!\nprintf '%s' "$child" > ${q(join(control, 'pid'))}\ntrap 'kill -KILL "$child" 2>/dev/null' HUP INT TERM\nwait "$child"\nexit $?\n`, { mode: 0o500 })
+  // Preserve stdin before the shell redirects background jobs from /dev/null.
+  writeFileSync(wrapper, `#!/bin/sh\nexec 3<&0\n${command.map(q).join(' ')} "$@" <&3 &\nchild=$!\nprintf '%s' "$child" > ${q(join(control, 'pid'))}\ntrap 'kill -KILL "$child" 2>/dev/null' HUP INT TERM\nwait "$child"\nexit $?\n`, { mode: 0o500 })
   return { run: run.id, gateway: socket, wrapper, env: { PATH: `${bin}:/usr/local/bin:/usr/bin:/bin` }, logsHome: state, captures, close: async () => { killSandbox(control); for (const s of sockets) s.destroy(); await new Promise<void>((resolve) => server.close(() => { rmSync(gatewayDir, { recursive: true, force: true }); resolve() })) } }
   } catch (e) { for (const socket of sockets) socket.destroy(); server.close(); rmSync(gatewayDir, { recursive: true, force: true }); throw e }
 }
