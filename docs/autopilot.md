@@ -46,6 +46,7 @@ containing hardlinks to shared files is refused rather than exposing those share
 The selected OMP executable is available as `omp` inside its sandbox; its presence does not imply that OMP
 has reached interactive readiness or that its configured model gateway is reachable. The private OMP home
 starts with onboarding marked complete after provider selection; host settings are not copied.
+The launcher preserves terminal input for interactive agents while keeping the isolated process group separate.
 If the project uses Git, its root must have an ordinary `.git` directory, not a Git worktree. A task worktree's Git metadata
 must resolve to that project's own `.git/worktrees` directory; unrelated metadata paths are refused.
 
