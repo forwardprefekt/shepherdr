@@ -559,6 +559,8 @@ export class Engine extends Emitter<Events> {
       if (said?.helper) return NEED.permission
       const q = this.chats.openQuestion(key)
       if (q) return fitStatus(q.items[0]?.question ?? '') || NEED.question
+      const menu = this.chats.menu(key)
+      if (menu?.question) return fitStatus(menu.title) || NEED.question
       return loginGone(this.chats.menu(key)?.title) ? NEED.login : NEED.permission
     }
     const card = this.chats.openCard(key)

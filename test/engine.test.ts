@@ -4,6 +4,7 @@ import { describe, expect, test } from 'bun:test'
 import { existsSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { sh, repo, world, until, started, placeId, settingsBlock, writeJson, fakeHerdr } from './engine-world.ts'
+import { ompStatus } from '../server/live/agents.ts'
 const { fitStatus, reportOf, STALL_QUIET } = await import('../server/live/engine/engine.ts')
 
 describe('recovered private routing failures', () => {
@@ -172,6 +173,30 @@ describe('a task is its brief and one agent', () => {
     expect(w.engine.statusOf(t)).toBe('work')
     // its first turn ends: it waits on you as usual
     w.agentIs(key, 'idle')
+    expect(w.engine.statusOf(t)).toBe('need')
+  })
+
+  test('an OMP task follows its live turn and shows its real question, not a permission', async () => {
+    const w = world(fakeHerdr(), { boot: 'idle' })
+    const p = await w.places.add(repo(), 'omp-status')
+    const t = w.engine.add({ project: p.name, title: 'Say hello', desc: 'Add hello.txt.', by: 'test' })
+    const key = `${t.id}/Agent`
+    await until(() => w.started.some((s) => s.key === key) && w.engine['briefing'].has(t.id))
+    w.brief(key)
+    expect(w.engine.statusOf(t)).toBe('todo')
+    w.agentIs(key, ompStatus('idle', 'π ⠧ 📋 OMP: Task'))
+    expect(w.engine.view(t).status).toBe('work')
+    w.chat.menu = { title: 'Choose a color', question: true }
+    w.agentIs(key, ompStatus('idle', 'π ! 🎨 COLOR: Choose Red or Blue'))
+    expect(w.engine.view(t)).toMatchObject({ status: 'need', sub: 'Choose a color' })
+    w.chat.menu = undefined
+    w.agentIs(key, ompStatus('idle', 'π ⠧ 📋 OMP: Task'))
+    expect(w.engine.statusOf(t)).toBe('work')
+    w.agentIs(key, ompStatus('idle', 'π > 📋 OMP: Task'))
+    expect(w.engine.statusOf(t)).toBe('need')
+    w.bg[key] = 'agents'
+    expect(w.engine.statusOf(t)).toBe('work')
+    w.chat.card = 'ask'
     expect(w.engine.statusOf(t)).toBe('need')
   })
 
