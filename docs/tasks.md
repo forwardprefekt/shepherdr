@@ -59,10 +59,11 @@
   file of its own (`--settings`, in `~/.shepherdr/hooks/`; your own settings are never touched) whose hooks record
   each event: a turn starts or ends, what still runs in the background as it ends, a permission prompt (a subagent's
   too), its question tool, a plan. A turn cut short (Esc, a prompt turned down) runs no hook; its transcript says it
-  ended. herdr's reading of the screen counts only where the agent reports nothing: Codex (its hooks each need
-  trusting in a dialog first, and it writes OSC 7501 itself, which herdr will pass on), pi (it tells only a turn's
-  end), an agent started before this, or a menu up between turns that no hook tells of. One function (`statusFrom` in
-  `server/live/agents.ts`) decides, so taking herdr's OSC 7501 program status once it passes that on is one change.
+  ended. Oh My Pi's live terminal title distinguishes an active turn from an interactive question when herdr reports
+  idle; its transcript alone cannot establish that a turn is still running. Herdr's blocked and stopped states and open
+  questions still win. For Codex, pi and agents started before hooks, herdr's screen reading counts where the agent
+  reports nothing. `statusFrom` in `server/live/agents.ts` combines reported and observed states.
+  OMP's interactive Ask dialog shows its full screen with an Open terminal button; answer it there, including custom text.
 - On a repo with a GitHub remote that `gh` is logged in to, each task gets a pull request. The shepherdr-agent skill runs
   `shepherdr pr <id>`: it pushes the branch and opens a draft (its title the task's, its words the agent's summary, the
   brief's gist and a "Generated with" footer), and pushes to it again after new commits. `shepherdr checks <id>` waits

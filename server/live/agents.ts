@@ -210,6 +210,14 @@ export function statusFrom(said: Said | undefined, seen: AgentStatus | 'gone'): 
   return seen === 'done' || seen === 'blocked' ? seen : 'idle'
 }
 
+/** OMP's live title distinguishes a running turn from its interactive question, independent of its transcript. */
+export function ompStatus(seen: AgentStatus | 'gone', title?: string | null): AgentStatus | 'gone' {
+  if (seen === 'gone' || seen === 'done' || seen === 'blocked') return seen
+  if (/^π\s+!\s/.test(title ?? '')) return 'blocked'
+  if ((seen === 'idle' || seen === 'unknown') && /^π\s+[⠁-⣿]\s/.test(title ?? '')) return 'working'
+  return seen
+}
+
 /** what a refusal from herdr means for what you send: a menu is up, or the agent just started and herdr doesn't count
  *  it as its named agent yet ("agent shep-all is not an active named agent"); anything else, it can't go in */
 export function holdFrom(e: unknown): Hold | undefined {
@@ -364,7 +372,9 @@ export class Agents extends Emitter<Events> {
   }
 
   status(key: string): AgentStatus | 'gone' {
-    return statusFrom(this.said(key), this.info(key)?.agent_status ?? 'gone')
+    const info = this.info(key)
+    const seen = info?.agent_status ?? 'gone'
+    return statusFrom(this.said(key), this.record(key)?.kind === 'omp' && info?.agent === 'omp' ? ompStatus(seen, info.terminal_title_stripped) : seen)
   }
 
   private codexState = new Map<string, AgentRuntime>()

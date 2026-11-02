@@ -132,6 +132,8 @@ export interface ScreenMenu {
   multi?: boolean
   selected?: number[]
   reject?: string
+  /** An interactive question, rather than a permission menu. */
+  question?: boolean
   /** The visible prompt, including security context that must not be lost. */
   screen?: string
 }
@@ -140,7 +142,7 @@ export interface ScreenMenu {
 export function menuId(key: string, m: ScreenMenu) {
   const screen = m.multi
     ? m.screen?.split('\n').map((l) => l.trim().replace(/^[❯›>▶]\s*/, '').replace(/^\[[✔✓x ]\]/, '[ ]')).join('\n')
-    : m.screen?.replace(/^(\s*)[❯›>▶](?=\s)/gm, '$1 ')
+    : m.screen?.replace(/^(\s*(?:[│|]\s*)?)[❯›>▶](?=\s)/gm, '$1 ')
   return `menu:${key}:${createHash('sha256').update(JSON.stringify([m.title, m.choices, screen])).digest('hex').slice(0, 16)}`
 }
 
@@ -202,6 +204,14 @@ function startupMenu(lines: string[]): ScreenMenu | null {
 
 export function parseMenu(screen: string): ScreenMenu | null {
   const lines = screen.split('\n').map((l) => l.replace(/\s+$/, '').replace(/^[\s│|]+|[│|]+$/g, (m) => m.replace(/[│|]/g, ' ')))
+  // OMP's ask dialog has a bordered question and radio rows rather than a numbered list.
+  const ask = lines.findLastIndex((l) => /╭─\s*Ask\s*─/.test(l))
+  if (ask >= 0 && /⏎ select.*[↑↓]/.test(lines.slice(ask).join('\n'))) {
+    const rows = lines.slice(ask + 1)
+    const title = rows.find((l) => l.trim() && !/[╭╮╰╯├┤─]/.test(l))?.trim()
+    // OMP's Other choice opens a text input: answer this dialog in the terminal, not with partial keys.
+    if (title) return { title, choices: [], cursor: 0, screen: screen.trim(), question: true }
+  }
   const OPT = /^(\s*)([❯›>▶*]\s*)?(\d{1,2})[.)]\s+(.+)$/
   // the last numbered list on screen that starts at 1
   let first = -1

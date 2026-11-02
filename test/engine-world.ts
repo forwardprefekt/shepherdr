@@ -82,7 +82,7 @@ export function world(herdr = fakeHerdr(), o: { boot?: string } = {}) {
   const stopped: string[] = []
   const posted: { key: string; id: string; question?: { kind: string; steps?: string[] }; card?: { text: string; restart?: boolean } }[] = []
   /** what the agent's chat holds: its last reply, an open card of Shepherdr's, its CLI's own question */
-  const chat: { reply?: string; card?: 'plan' | 'ask'; cardTitle?: string; question?: boolean; unseen?: string[]; messages?: { who: string; text?: string; card?: object }[] } = { reply: 'Which name do you want?' }
+  const chat: { reply?: string; card?: 'plan' | 'ask'; cardTitle?: string; question?: boolean; menu?: { title: string; question?: boolean }; unseen?: string[]; messages?: { who: string; text?: string; card?: object }[] } = { reply: 'Which name do you want?' }
   const chats = {
     post: (key: string, p: { id: string; question?: { kind: string } }) => posted.push({ key, ...p }),
     lastReply: () => chat.reply,
@@ -90,7 +90,7 @@ export function world(herdr = fakeHerdr(), o: { boot?: string } = {}) {
     openCard: () => chat.card,
     openCardTitle: () => (chat.card ? chat.cardTitle : undefined),
     unseen: () => chat.unseen ?? [],
-    menu: (key: string) => (status[key] === 'blocked' ? { title: 'Allow: rm -rf build' } : undefined),
+    menu: (key: string) => chat.menu ?? (status[key] === 'blocked' ? { title: 'Allow: rm -rf build' } : undefined),
     forget: (key: string) => forgot.push(`chat ${key}`),
     chat: () => ({ messages: chat.messages ?? [] }),
   }
